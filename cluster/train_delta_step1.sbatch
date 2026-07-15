@@ -10,7 +10,7 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
 #SBATCH --cpus-per-task=16          # must exceed --num_workers=12
-#SBATCH --mem=64G                   # 3 cameras x 12 workers of video decoding
+#SBATCH --mem=128G                  # 3 cameras x 12 workers of video decoding
 #SBATCH --time=3-00:00:00           # step0 needs ~20h; keep uniform headroom
 #SBATCH --output=slurm-delta-step1-%j.out
 
