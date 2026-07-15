@@ -38,18 +38,44 @@ export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export USER="${USER:-$(id -un)}"
 echo "HOME=$HOME USER=$USER"
 
-IMAGE="docker://hyeonseoke/lerobot_delta:v1"  # hyeonseoke/lerobot:v1 + the SmolVLA delta patch (cluster/Dockerfile)
-
-# ------------------------------------------------------- the SmolVLA delta patch
-# Baked into the image. lerobot_delta rewrites four files in the installed lerobot so
-# SmolVLA can train on chunk-wise delta joint actions; see cluster/delta_patch.py for
-# what and why, and cluster/Dockerfile for the build. Nothing to do at runtime -- but
-# the preflight below still asserts the patch is live, because a job that silently fell
-# back to absolute actions while every log line said DELTA is the failure we most need
-# to catch.
+# ------------------------------------------------------------ code source: DEV vs baked
+# Two ways to get the delta-patched lerobot into the container:
 #
-# Rebuild with:
-#   docker build -f cluster/Dockerfile -t hyeonseoke/lerobot_delta:v1 . && docker push hyeonseoke/lerobot_delta:v1
+#   DEV_MODE=1 (default)  Live code. Bind-mount your kaia_lerobot checkout's src/lerobot
+#                         over the base image's installed package. Iterate with
+#                         "git pull" (cluster/git_sync.sbatch) + resubmit -- NO image
+#                         rebuild. Uses the plain hyeonseoke/lerobot:v1 (deps only); the
+#                         delta patch comes from your source tree, not the image.
+#
+#   DEV_MODE=0            Frozen. Use the baked hyeonseoke/lerobot_delta:v1, ignore the
+#                         checkout. For reproducible runs that must not depend on whatever
+#                         $HOME/lerobot happens to contain. Build it with:
+#                           docker build -f cluster/Dockerfile -t hyeonseoke/lerobot_delta:v1 .
+#                           docker push hyeonseoke/lerobot_delta:v1
+#
+# Either way the preflight below asserts the delta patch is actually live, so a job that
+# silently fell back to absolute actions dies before wasting a GPU.
+DEV_MODE="${DEV_MODE:-1}"
+DEV_CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
+
+if [ "$DEV_MODE" = "1" ]; then
+  IMAGE="docker://hyeonseoke/lerobot:v1"        # deps only; code comes from the bind-mount
+  [ -d "$DEV_CHECKOUT/src/lerobot" ] || {
+    echo "FATAL: DEV_MODE=1 but $DEV_CHECKOUT/src/lerobot not found."
+    echo "       Clone/update it first (submit cluster/git_sync.sbatch), or set DEV_MODE=0"
+    echo "       to run from the baked hyeonseoke/lerobot_delta:v1 image instead."
+    exit 1
+  }
+  # Ask the image where its lerobot lives, then shadow that dir with the live checkout.
+  SP="$(apptainer exec "$IMAGE" python -c 'import lerobot, pathlib; print(pathlib.Path(lerobot.__file__).parent)')"
+  CODE_BIND=(--bind "$DEV_CHECKOUT/src/lerobot:$SP")
+  echo "=== DEV_MODE: live code $DEV_CHECKOUT/src/lerobot -> $SP (image: $IMAGE) ==="
+  echo "=== code HEAD: $(git -C "$DEV_CHECKOUT" rev-parse --short HEAD 2>/dev/null || echo '?') ==="
+else
+  IMAGE="docker://hyeonseoke/lerobot_delta:v1"  # baked patch (cluster/Dockerfile)
+  CODE_BIND=()
+  echo "=== baked image: $IMAGE ==="
+fi
 
 # ---------------------------------------------------------------- run config
 CAM3='{"observation.images.top": "observation.images.camera1", "observation.images.left_cam": "observation.images.camera2", "observation.images.right_cam": "observation.images.camera3"}'
@@ -194,7 +220,7 @@ nvidia-smi
 #     happily on ABSOLUTE actions while every log line said "delta". That is the
 #     same class of silent-wrong-thing failure that cost us three jobs on
 #     2026-07-13, so assert it explicitly rather than trust the bind.
-apptainer exec --nv "$IMAGE" python -c "
+apptainer exec --nv "${CODE_BIND[@]+"${CODE_BIND[@]}"}" "$IMAGE" python -c "
 import torch
 archs = torch.cuda.get_arch_list()
 print('torch', torch.__version__, 'cuda', torch.version.cuda)
@@ -282,7 +308,7 @@ else
   )
 fi
 
-apptainer exec --nv "$IMAGE" \
+apptainer exec --nv "${CODE_BIND[@]+"${CODE_BIND[@]}"}" "$IMAGE" \
   lerobot-train \
     "${POLICY_ARGS[@]}" \
     "${DELTA_ARGS[@]+"${DELTA_ARGS[@]}"}" \
