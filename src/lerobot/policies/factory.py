@@ -29,8 +29,10 @@ from lerobot.configs import FeatureType, PreTrainedConfig
 from lerobot.envs import EnvConfig, env_to_policy_features
 from lerobot.processor import (
     AbsoluteActionsProcessorStep,
+    NormalizerProcessorStep,
     PolicyProcessorPipeline,
     RelativeActionsProcessorStep,
+    UnnormalizerProcessorStep,
     batch_to_transition,
     policy_action_to_transition,
     transition_to_batch,
@@ -82,6 +84,63 @@ def _reconnect_relative_absolute_steps(
     for step in postprocessor.steps:
         if isinstance(step, AbsoluteActionsProcessorStep) and step.relative_step is None:
             step.relative_step = relative_step
+
+
+def _ensure_relative_absolute_steps(
+    policy_cfg: PreTrainedConfig,
+    preprocessor: PolicyProcessorPipeline,
+    postprocessor: PolicyProcessorPipeline,
+) -> None:
+    """Insert the relative/absolute action steps into pipelines loaded from a checkpoint lacking them.
+
+    PolicyProcessorPipeline.from_pretrained rebuilds the pipeline from the JSON the checkpoint
+    shipped with, so a base model uploaded before relative actions existed has no
+    relative_actions_processor step at all. lerobot/pi05_base does carry one; lerobot/pi0 and
+    lerobot/smolvla_base do not. Overriding a step that is not there raises
+        KeyError: Override keys ['relative_actions_processor'] do not match any step
+    so we insert them here instead, positioned exactly as the from-scratch factories do:
+    relative immediately before the normalizer, absolute immediately after the unnormalizer
+    (raw -> relative -> normalize -> model -> unnormalize -> absolute).
+    """
+    if not getattr(policy_cfg, "use_relative_actions", False):
+        return
+
+    relative_step = next((s for s in preprocessor.steps if isinstance(s, RelativeActionsProcessorStep)), None)
+    if relative_step is None:
+        relative_step = RelativeActionsProcessorStep()
+        norm_idx = next(
+            (i for i, s in enumerate(preprocessor.steps) if isinstance(s, NormalizerProcessorStep)), None
+        )
+        if norm_idx is None:
+            raise ValueError(
+                "Cannot enable relative actions: the loaded preprocessor has no NormalizerProcessorStep, "
+                "so there is no defined place to insert the relative conversion. Actions must be made "
+                "relative BEFORE normalization, since the stats are computed in relative space."
+            )
+        preprocessor.steps.insert(norm_idx, relative_step)
+
+    relative_step.enabled = True
+    relative_step.exclude_joints = list(getattr(policy_cfg, "relative_exclude_joints", []) or [])
+    relative_step.action_names = getattr(policy_cfg, "action_feature_names", None)
+
+    absolute_step = next(
+        (s for s in postprocessor.steps if isinstance(s, AbsoluteActionsProcessorStep)), None
+    )
+    if absolute_step is None:
+        absolute_step = AbsoluteActionsProcessorStep()
+        unnorm_idx = next(
+            (i for i, s in enumerate(postprocessor.steps) if isinstance(s, UnnormalizerProcessorStep)), None
+        )
+        if unnorm_idx is None:
+            raise ValueError(
+                "Cannot enable relative actions: the loaded postprocessor has no "
+                "UnnormalizerProcessorStep, so predicted deltas could not be turned back into "
+                "absolute actions for execution."
+            )
+        postprocessor.steps.insert(unnorm_idx + 1, absolute_step)
+
+    absolute_step.enabled = True
+    absolute_step.relative_step = relative_step
 
 
 def get_policy_class(name: str) -> type[PreTrainedPolicy]:
@@ -320,12 +379,26 @@ def make_pre_post_processors(
                 ),
             )
 
+        # The relative/absolute overrides are applied by _ensure_relative_absolute_steps below,
+        # not by from_pretrained: a base checkpoint predating relative actions has no such step
+        # in its saved pipeline, and overriding a step that is not there is a hard KeyError.
+        pre_overrides = {
+            k: v
+            for k, v in (kwargs.get("preprocessor_overrides") or {}).items()
+            if k != "relative_actions_processor"
+        }
+        post_overrides = {
+            k: v
+            for k, v in (kwargs.get("postprocessor_overrides") or {}).items()
+            if k != "absolute_actions_processor"
+        }
+
         preprocessor = PolicyProcessorPipeline.from_pretrained(
             pretrained_model_name_or_path=pretrained_path,
             config_filename=kwargs.get(
                 "preprocessor_config_filename", f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json"
             ),
-            overrides=kwargs.get("preprocessor_overrides", {}),
+            overrides=pre_overrides,
             to_transition=batch_to_transition,
             to_output=transition_to_batch,
             revision=pretrained_revision,
@@ -335,11 +408,12 @@ def make_pre_post_processors(
             config_filename=kwargs.get(
                 "postprocessor_config_filename", f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json"
             ),
-            overrides=kwargs.get("postprocessor_overrides", {}),
+            overrides=post_overrides,
             to_transition=policy_action_to_transition,
             to_output=transition_to_policy_action,
             revision=pretrained_revision,
         )
+        _ensure_relative_absolute_steps(policy_cfg, preprocessor, postprocessor)
         _reconnect_relative_absolute_steps(preprocessor, postprocessor)
         if isinstance(policy_cfg, Evo1Config):
             from .evo1.processor_evo1 import reconcile_evo1_processors

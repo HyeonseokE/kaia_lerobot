@@ -37,6 +37,21 @@ __all__ = [
 ]
 
 
+def _current_state(state: Tensor) -> Tensor:
+    """Reduce an observation-history state to the single reference step, (B, state_dim).
+
+    Policies differ in whether observation.state carries a time axis: SmolVLA's
+    observation_delta_indices is [0], so its batches hold (B, n_obs_steps, state_dim), while
+    pi0/pi0.5 return None and hold (B, state_dim). A chunk of relative actions is defined
+    against ONE reference state -- the current one -- so take the last observed step. Without
+    this, a (B, 1, D) state broadcasts against the (B, T, D) action chunk into (B, B, T, D)
+    and the subtraction fails.
+    """
+    if state.ndim == 3:
+        return state[:, -1]
+    return state
+
+
 def to_relative_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) -> Tensor:
     """Convert absolute actions to relative: relative = action - state (for masked dims).
 
@@ -45,6 +60,7 @@ def to_relative_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) ->
         state: (B, state_dim). Broadcast across time dimension.
         mask: Which dims to convert. Can be shorter than action_dim.
     """
+    state = _current_state(state)
     mask_t = torch.tensor(mask, dtype=actions.dtype, device=actions.device)
     dims = mask_t.shape[0]
     # Align state to the same device/dtype as actions. _last_state is cached before
@@ -67,6 +83,7 @@ def to_absolute_actions(actions: Tensor, state: Tensor, mask: Sequence[bool]) ->
         state: (B, state_dim). Broadcast across time dimension.
         mask: Which dims to convert. Can be shorter than action_dim.
     """
+    state = _current_state(state)
     mask_t = torch.tensor(mask, dtype=actions.dtype, device=actions.device)
     dims = mask_t.shape[0]
     # Align state to the same device/dtype as actions. _last_state is cached before
