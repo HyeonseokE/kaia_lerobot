@@ -50,26 +50,9 @@ if [ "$DEV_MODE" = "1" ]; then
     exit 1
   }
 
-  # Auto-pull the latest code before training, so "edit + push on the dev box -> resubmit
-  # this job" is the whole loop -- no separate sync step, no image rebuild. git_sync.sbatch
-  # is then only for the very first clone.
-  #
-  # flock serializes the pull so concurrently submitted step jobs don't race on one .git:
-  # the first pulls, the rest find it already up to date. A job that is already training is
-  # unaffected -- Python imported its modules at startup, so later file changes are not
-  # re-read. (Caveat: to compare steps on the SAME commit, submit them together so they land
-  # on one commit, or set AUTO_PULL=0 to freeze on whatever is checked out.)
-  AUTO_PULL="${AUTO_PULL:-1}"
-  if [ "$AUTO_PULL" = "1" ]; then
-    echo "=== auto-pull $DEV_CHECKOUT (ff-only, flock-serialized) ==="
-    flock "$DEV_CHECKOUT/.git" \
-      apptainer exec "$IMAGE" git -C "$DEV_CHECKOUT" pull --ff-only || {
-        echo "FATAL: git pull failed -- network down, or the checkout diverged from origin."
-        echo "       Someone likely edited files on the cluster. Fix it, or set AUTO_PULL=0"
-        echo "       to train the current checkout as-is."
-        exit 1
-      }
-  fi
+  # NOTE: the checkout was already `git pull`ed by the wrapper BEFORE it sourced this file,
+  # so both this body and src/lerobot are current here. The pull lives in the wrapper (not
+  # here) because a pull inside this file could not update this file -- it was already read.
 
   # Ask the image where its lerobot lives, then shadow that dir with the live checkout.
   SP="$(apptainer exec "$IMAGE" python -c 'import lerobot, pathlib; print(pathlib.Path(lerobot.__file__).parent)')"

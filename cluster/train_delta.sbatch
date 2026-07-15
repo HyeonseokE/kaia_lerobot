@@ -12,6 +12,9 @@
 # Each array task is a separate SLURM job on its own GPU; they run in parallel and never
 # touch each other. Do NOT include a step already running (the per-run lock kills the dup).
 #
+# Like the per-step wrappers, this git-pulls $HOME/lerobot before running, so the job
+# updates itself from GitHub; git_sync.sbatch is only for the first clone.
+#
 #SBATCH --job-name=smolvla-delta
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
@@ -24,11 +27,21 @@
 set -euo pipefail
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 
-BODY="$HOME/lerobot/cluster/train_delta_body.sh"
+CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
+
+# Pull latest BEFORE sourcing the body (see the per-step wrappers for why). flock
+# serializes the concurrent array tasks on the one .git.
+if [ "${AUTO_PULL:-1}" = "1" ] && [ -d "$CHECKOUT/.git" ]; then
+  echo "=== auto-pull $CHECKOUT (ff-only, flock-serialized) ==="
+  flock "$CHECKOUT/.git" apptainer exec docker://hyeonseoke/lerobot:v1 \
+    git -C "$CHECKOUT" pull --ff-only \
+    || { echo "FATAL: git pull failed (network, or checkout diverged). Fix, or set AUTO_PULL=0."; exit 1; }
+fi
+
+BODY="$CHECKOUT/cluster/train_delta_body.sh"
 [ -f "$BODY" ] || { echo "FATAL: $BODY not found. Clone once with cluster/git_sync.sbatch."; exit 1; }
 
-# The array index picks the step; the body reads $STEP. Fail loudly if the --array line
-# was not honoured rather than guess a dataset.
+# The array index picks the step; the body reads $STEP.
 [ -n "${SLURM_ARRAY_TASK_ID:-}" ] || { echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."; exit 1; }
 export STEP="$SLURM_ARRAY_TASK_ID"
 source "$BODY"
