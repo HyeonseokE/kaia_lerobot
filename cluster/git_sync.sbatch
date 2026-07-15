@@ -9,9 +9,12 @@
 # git itself lives inside the training image, not necessarily on the bare compute
 # node, so the clone runs via `apptainer exec`.
 #
-# Idempotent: clones if absent, `git pull`s if already there. Re-submit this same job
-# whenever you want the cluster to pick up new commits -- this is the "update code"
-# step of the dev loop (edit + push on your dev box -> submit this -> submit training).
+# Idempotent: clones if absent, `git pull`s if already there.
+#
+# Normally you run this ONCE, to create the initial $HOME/lerobot checkout. After that,
+# cluster/train_delta.sbatch auto-pulls at the start of every training run (DEV_MODE=1),
+# so the dev loop is just "edit + push on your dev box -> submit training". Keep this job
+# for the first clone, and as a manual updater if you ever want to pull without training.
 #
 # Submit it from OpenOnDemand: Jobs -> Job Composer -> New Job, paste this script,
 # Submit. No GPU, clears the queue fast.
