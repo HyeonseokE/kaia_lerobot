@@ -21,13 +21,21 @@
 # its own node with its own GPU, output dir and wandb run. They run in parallel
 # and never touch each other.
 #
+# Set the --array line below to pick which steps to launch:
+#   --array=0,2,3   step0, step2, step3 in parallel (step1 already running)
+#   --array=0-3     all four
+#   --array=1       just step1
+#   --array=0-3%2   all four, but at most 2 running at once (GPU-limited)
+# Do NOT include a step that is already running -- the per-run lock will kill the
+# duplicate, but it is cleaner not to submit it.
+#
 #SBATCH --job-name=smolvla-delta
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
 #SBATCH --cpus-per-task=16          # must exceed --num_workers=12
 #SBATCH --mem=64G                   # 3 cameras x 12 workers of video decoding
 #SBATCH --time=3-00:00:00           # step0 needs ~20h; 24h is too tight
-#SBATCH --array=1
+#SBATCH --array=0,2,3
 #SBATCH --output=slurm-delta-%A_%a.out
 
 set -euo pipefail
