@@ -70,16 +70,21 @@ RENAME="$CAM2"
 # so a 2000 run there would silently overwrite the 1000 run's Hub repo. This job does
 # what the README describes.
 #
-# Seed 1000 keeps the bare name, because that is what the already-published repos are
-# called (smolvla_phase1_<task>_A1_10fps, pushed 2026-08-23/24). Other seeds get a
-# _sNNNN suffix. Same convention as SCRAPE's train_smolvla_A_test_ik_action_10fps.sh.
+# Naming: the seed sits between the condition and 10fps, the same slot the ablation
+# scripts use (configs/ablation_study/README.md, smolvla_ablation_<task>_<seed>_10fps):
+#
+#   HyeonseokE/smolvla_phase1_<task>_<condition>_<seed>_10fps
+#
+# Seed 1000 is NOT special -- it carries its seed like the others. The seed-less repos
+# on the Hub (smolvla_phase1_*_A1_10fps, pushed 2026-08-23/24) predate this convention;
+# runs from here land beside them under the new name, they are not overwritten, and
+# nothing cleans them up automatically.
 SEED="${SEED:-1000}"
 case "$SEED" in
-  1000) SFX="" ;;
-  2000|3000) SFX="_s${SEED}" ;;
+  1000|2000|3000) ;;
   *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
 esac
-NAME="smolvla_phase1_${TASK}_A1_10fps${SFX}"
+NAME="smolvla_phase1_${TASK}_A1_${SEED}_10fps"
 
 # Final checkpoint only, matching the phase1 scripts.
 #
@@ -240,9 +245,9 @@ fi
 # push_model_to_hub AFTER the training loop, past "End of training". A run that dies mid
 # way -- crash, walltime kill, node failure -- never reaches it and pushes nothing.
 #
-# WARNING: this OVERWRITES the repo. smolvla_phase1_{push_button,pick_place,
-# sort_by_color}_A1_10fps all already exist, pushed 2026-08-23/24 from the SCRAPE box.
-# Re-running seed 1000 replaces them.
+# The repo is named with the seed, so this does NOT overwrite the seed-less repos
+# published on 2026-08-23/24 -- it creates smolvla_phase1_<task>_A1_1000_10fps beside
+# them. Delete the old ones by hand if you want them gone.
 apptainer exec --nv "$IMAGE" \
   lerobot-train \
     "${POLICY_ARGS[@]}" \

@@ -74,6 +74,16 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 step 공식도 다르다 — phase1 은 `floor(frames/64) × 50` (에포크당 내림 후 곱셈),
 cap300 은 총합 올림. 서로 베끼지 말 것.
 
+시드는 1000 / 2000 / 3000 세 번을 다 돌려야 한다 (phase1_README.md — 분석 단위가
+롤아웃이 아니라 training run 이라 셀당 ≥3 시드 mean±std 로 보고한다). 기본은 1000:
+
+```
+sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
+```
+
+모델 레포는 `smolvla_phase1_<task>_A1_<seed>_10fps` — 시드가 조건과 `10fps` 사이에
+들어가므로 세 런이 서로 덮어쓰지 않는다.
+
 ### C. SmolVLA — towel_fold01, delta action
 
 | # | 파일 | 비고 |

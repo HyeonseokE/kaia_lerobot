@@ -34,13 +34,12 @@
 #
 #   sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
 #
-# Seed 1000 keeps the bare run/repo name, other seeds get a _sNNNN suffix, so the three
-# runs never overwrite each other.
+# The seed goes in the model repo name -- smolvla_phase1_<task>_A1_<seed>_10fps, the
+# same slot ablation_study uses -- so the three runs never overwrite each other.
 #
-# WARNING: smolvla_phase1_{push_button,pick_place,sort_by_color}_A1_10fps already exist
-# on the Hub, pushed 2026-08-23/24 from the SCRAPE box. Re-running seed 1000 REPLACES
-# them. That is probably what you want if the datasets were re-collected since -- but it
-# is not reversible, so know that it is happening.
+# NOTE: the seed-LESS repos on the Hub (smolvla_phase1_*_A1_10fps, pushed 2026-08-23/24)
+# predate that convention. Runs from here land beside them under the new name rather
+# than replacing them; delete the old ones by hand if you want them gone.
 #
 #SBATCH --job-name=phase1-main
 #SBATCH --partition=gpu
