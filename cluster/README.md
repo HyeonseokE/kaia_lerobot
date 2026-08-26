@@ -19,8 +19,8 @@ OOD Job Composer → New Job → 파일 내용을 붙여넣고 Submit. `#SBATCH`
 
 ## 실험별 — 무엇을 어떤 순서로
 
-B 와 C 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
-`FATAL: ... _body.sh not found` 로 즉사한다. A 는 `main_job.sbatch` 가 클론까지 하므로
+C 와 D 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
+`FATAL: ... _body.sh not found` 로 즉사한다. A·B 는 `main_job*.sbatch` 가 클론까지 하므로
 0번이 필요 없다.
 
 | # | 파일 | 언제 |
@@ -50,7 +50,31 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 
 `train_cap300.sbatch` / `train_cap300_body.sh` 는 `main_job` 이 알아서 쓴다. 손대지 않는다.
 
-### B. SmolVLA — towel_fold01, delta action
+### B. SmolVLA — SCRAPE ablation_study Phase-1, condition A1
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_phase1.sbatch`** | **이것 하나만 던진다.** 0번(git_sync)도 필요 없다 |
+
+`main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 3종 prefetch →
+학습 잡 제출. 체이닝은 없다. 세 셀이 각각 2h/7h/16h 라 한 잡에 하나씩 들어간다.
+
+| array | task | frames | steps (50 ep) |
+|---|---|---|---|
+| 0 | push_button | 11,299 | 8,800 |
+| 1 | pick_place | 31,744 | 24,800 |
+| 2 | sort_by_color | 74,255 | 58,000 |
+
+**학습 인자는 SCRAPE phase1 컨벤션을 따른다** — batch **64**(32 아님), seed 1000,
+50 epoch, torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 를 비교하는
+실험이고, 모든 셀을 동일하게 학습해야 비교가 성립한다. SCRAPE 박스에서 이미 batch 64 로
+돌린 셀들이 있으므로 여기서 batch 32 로 돌리면 그것들과 비교 불가다.
+`train_cap300_body.sh` 의 숫자와 "통일"하지 말 것.
+
+step 공식도 다르다 — phase1 은 `floor(frames/64) × 50` (에포크당 내림 후 곱셈),
+cap300 은 총합 올림. 서로 베끼지 말 것.
+
+### C. SmolVLA — towel_fold01, delta action
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -58,7 +82,7 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 | 2 | `train_delta_step{0,1,2,3}.sbatch` | 스텝 하나만 띄울 때. 이쪽을 기본으로 |
 | 2' | `train_delta.sbatch` | 여러 스텝을 한 번에 (`--array`). 이미 도는 스텝은 넣지 말 것 |
 
-### C. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
+### D. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -71,8 +95,8 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
    OOD Files 앱으로 만든다. 없으면 학습 잡이 시작 직후 FATAL.
 2. 수정한 스크립트가 **GitHub `main` 에 push 되어 있을 것**. 잡은 `$HOME/lerobot` 을
    `git pull --ff-only` 로 갱신해서 `_body.sh` 와 `src/lerobot` 을 읽는다.
-3. (B·C) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
-   `FATAL: $HOME/datasets/... not found`. A 는 `main_job.sbatch` 가 순서를 보장한다.
+3. (C·D) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
+   `FATAL: $HOME/datasets/... not found`. A·B 는 `main_job*.sbatch` 가 순서를 보장한다.
 
 ## 자동 pull 이 닿지 않는 곳 — 함정
 
