@@ -58,8 +58,28 @@ esac
 HUB_USER=HyeonseokE
 DS="phase1_${TASK}_A1_10fps"
 DATASET="$HUB_USER/$DS"
-NAME="smolvla_phase1_${TASK}_A1_10fps"
 RENAME="$CAM2"
+
+# Training seed. phase1_README.md "필수: 학습 시드 1000 / 2000 / 3000" requires each cell
+# to be trained three times -- seed 1000, 2000, 3000 -- and reported as mean +/- std over
+# seeds, because the unit of analysis is the training run, not the rollout.
+#
+# The README says the phase1 scripts take a SEED env var and put the seed in the output
+# dir and Hub repo so the three runs do not overwrite each other. The scripts on the
+# SCRAPE box do NOT actually do that -- they hardcode --seed=1000 and a seed-less name,
+# so a 2000 run there would silently overwrite the 1000 run's Hub repo. This job does
+# what the README describes.
+#
+# Seed 1000 keeps the bare name, because that is what the already-published repos are
+# called (smolvla_phase1_<task>_A1_10fps, pushed 2026-08-23/24). Other seeds get a
+# _sNNNN suffix. Same convention as SCRAPE's train_smolvla_A_test_ik_action_10fps.sh.
+SEED="${SEED:-1000}"
+case "$SEED" in
+  1000) SFX="" ;;
+  2000|3000) SFX="_s${SEED}" ;;
+  *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
+esac
+NAME="smolvla_phase1_${TASK}_A1_10fps${SFX}"
 
 # Final checkpoint only, matching the phase1 scripts.
 #
@@ -171,7 +191,7 @@ echo "${SLURM_JOB_ID:-unknown}" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 echo "=== Job start: $(date) on $(hostname) ==="
-echo "=== Phase-1 A1 / $TASK: $NAME  dataset=$DATASET  frames=$HAVE_FRAMES  steps=$STEPS (50 epochs, batch 64, seed 1000) ==="
+echo "=== Phase-1 A1 / $TASK: $NAME  dataset=$DATASET  frames=$HAVE_FRAMES  steps=$STEPS (50 epochs, batch 64, seed $SEED) ==="
 nvidia-smi
 
 # ------------------------------------------------------------------- preflight
@@ -212,10 +232,17 @@ else
 fi
 
 # The SCRAPE scripts train with push_to_hub=false and then upload the final checkpoint
-# with the `hf` CLI. Here lerobot does the upload itself instead: `hf` may not exist in
-# this image, and pushing from inside training needs no CLI. The outcome is the same,
-# including "a crashed run publishes nothing" -- with save_freq == steps the only
-# checkpoint that ever exists is the final one.
+# with the `hf` CLI, guarded on the checkpoint existing. Here lerobot does the upload
+# itself instead: `hf` may not exist in this image, and pushing from inside training
+# needs no CLI.
+#
+# The "a crashed run publishes nothing" property is preserved: lerobot_train.py:739 runs
+# push_model_to_hub AFTER the training loop, past "End of training". A run that dies mid
+# way -- crash, walltime kill, node failure -- never reaches it and pushes nothing.
+#
+# WARNING: this OVERWRITES the repo. smolvla_phase1_{push_button,pick_place,
+# sort_by_color}_A1_10fps all already exist, pushed 2026-08-23/24 from the SCRAPE box.
+# Re-running seed 1000 replaces them.
 apptainer exec --nv "$IMAGE" \
   lerobot-train \
     "${POLICY_ARGS[@]}" \
@@ -229,7 +256,7 @@ apptainer exec --nv "$IMAGE" \
     --policy.private=false \
     --output_dir="$RUN_DIR/out" \
     --job_name="$NAME" \
-    --seed=1000 \
+    --seed="$SEED" \
     --batch_size=64 \
     --steps="$STEPS" \
     --policy.scheduler_decay_steps="$STEPS" \

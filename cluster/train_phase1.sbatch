@@ -11,6 +11,12 @@
 #
 #   sbatch --array=1 cluster/train_phase1.sbatch      # just pick_place
 #
+# SEED selects the training seed (1000 default, 2000 and 3000 also allowed). phase1
+# requires all three per cell -- see phase1_README.md. Seed 1000 keeps the bare run and
+# repo name; other seeds get a _sNNNN suffix, so the three never overwrite each other:
+#
+#   sbatch --export=ALL,SEED=2000 cluster/train_phase1.sbatch
+#
 # NOT chained, unlike train_cap300.sbatch. Chaining exists there because those runs are
 # 20-29 h each and two of them would not fit one walltime. These three are 1-16 h, so
 # each fits its own job with room to spare and there is nothing to serialise. Add
@@ -53,4 +59,6 @@ BODY="$CHECKOUT/cluster/train_phase1_body.sh"
   exit 1
 }
 export PHASE1_TASK="$SLURM_ARRAY_TASK_ID"
+export SEED="${SEED:-1000}"
+echo "=== training seed: $SEED ==="
 source "$BODY"

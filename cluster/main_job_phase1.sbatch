@@ -26,8 +26,21 @@
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
-# Step 4 refuses to run if phase1 jobs are already queued, so a resubmit will not
-# create duplicates.
+# Step 4 refuses to run if phase1 jobs for THIS seed are already queued, so a resubmit
+# will not create duplicates.
+#
+# SEED picks the training seed; phase1_README.md requires 1000, 2000 and 3000 for every
+# cell, reported as mean +/- std over seeds. Default here is 1000. For the others:
+#
+#   sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
+#
+# Seed 1000 keeps the bare run/repo name, other seeds get a _sNNNN suffix, so the three
+# runs never overwrite each other.
+#
+# WARNING: smolvla_phase1_{push_button,pick_place,sort_by_color}_A1_10fps already exist
+# on the Hub, pushed 2026-08-23/24 from the SCRAPE box. Re-running seed 1000 REPLACES
+# them. That is probably what you want if the datasets were re-collected since -- but it
+# is not reversible, so know that it is happening.
 #
 #SBATCH --job-name=phase1-main
 #SBATCH --partition=gpu
@@ -56,7 +69,13 @@ mkdir -p "$APPTAINER_CACHEDIR"
 # ------------------------------------------------------------------ 1. preflight
 # Check the tokens NOW, not after the downloads. The training jobs need both and die
 # instantly without them; there is no point prefetching first.
-echo "=== [1/4] preflight ==="
+SEED="${SEED:-1000}"
+case "$SEED" in
+  1000|2000|3000) ;;
+  *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
+esac
+
+echo "=== [1/4] preflight (seed $SEED) ==="
 for f in ~/.wandb_token ~/.hf_token; do
   [ -s "$f" ] || { echo "FATAL: $f is missing or empty. Create it in the OOD Files app."; exit 1; }
 done
@@ -159,16 +178,19 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit training jobs ==="
-RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c '^smolvla-phase1' || true)"
+echo "=== [4/4] submit training jobs (seed $SEED) ==="
+# Per-seed, not per-experiment: seeds 1000/2000/3000 write to different run dirs and Hub
+# repos, so a 2000 run is not a duplicate of a queued 1000 run.
+JOBNAME="smolvla-phase1-s${SEED}"
+RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING phase1 training job(s) are already queued or running."
+  echo "FATAL: $RUNNING phase1 seed-$SEED training job(s) are already queued or running."
   echo "       Refusing to submit duplicates. Cancel them first if you meant to restart:"
-  squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E 'JOBID|smolvla-phase1'
+  squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E "JOBID|${JOBNAME}"
   exit 1
 fi
 
-sbatch "$TRAIN_JOB"
+sbatch --job-name="$JOBNAME" --export=ALL,SEED="$SEED" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
