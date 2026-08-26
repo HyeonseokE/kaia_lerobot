@@ -31,7 +31,7 @@
 #SBATCH --job-name=smolvla-phase1-packed
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=14          # 6 workers x 2 runs, plus room for the main threads
+#SBATCH --cpus-per-task=18          # 8 workers x 2 runs, plus room for the main threads
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00
 #SBATCH --array=0-7%2               # %2 = two GPUs, i.e. four trainings at once
@@ -55,10 +55,10 @@ BODY="$CHECKOUT/cluster/train_phase1_body.sh"
 [ -n "${SLURM_ARRAY_TASK_ID:-}" ] || { echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."; exit 1; }
 K="$SLURM_ARRAY_TASK_ID"
 
-# Two runs share this GPU, so they share the node's CPUs too. 6 workers each instead of
-# 8: the node has 64 CPUs and data_s is 0.013 s against updt_s 0.318, so the loader has
-# an enormous margin and giving some back costs nothing.
-export NUM_WORKERS="${NUM_WORKERS:-6}"
+# 8 workers per run, same as the unpacked launcher -- two runs means 16 workers on this
+# job, which is why cpus-per-task is 18. Lower it if the partition is tight on CPUs:
+# data_s is 0.013 s against updt_s 0.318, so the loader has an enormous margin.
+export NUM_WORKERS="${NUM_WORKERS:-8}"
 
 RUNS=()
 for i in $(( K * 2 )) $(( K * 2 + 1 )); do
