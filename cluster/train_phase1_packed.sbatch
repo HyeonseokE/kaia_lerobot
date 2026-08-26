@@ -1,33 +1,41 @@
 #!/bin/bash
-# SmolVLA Phase-1 -- several cells PACKED onto ONE GPU.
+# SmolVLA Phase-1 -- TWO runs per GPU.
 #
-# SmolVLA at batch 64 holds ~16 GB, so a 96 GB pro6000 has room for several runs at
-# once. This wrapper takes a list of cells and runs them CONCURRENTLY inside one job,
-# sharing that job's single GPU.
+# SLURM allocates a GPU exclusively to a job, so two separate jobs can never share one.
+# The only way to put two trainings on one GPU is to launch both inside a single job --
+# which is what this does. SmolVLA at batch 64 holds ~14.4 GB, so two fit in a 96 GB
+# pro6000 with room to spare.
 #
-#   sbatch --export=ALL,CELLS=0,3 cluster/train_phase1_packed.sbatch
-#   sbatch --export=ALL,CELLS=0,3,4,SEED=2000 cluster/train_phase1_packed.sbatch
+#   sbatch cluster/train_phase1_packed.sbatch                 # the whole 15-run grid
+#   sbatch --array=0-3 cluster/train_phase1_packed.sbatch     # first 8 runs only
 #
-# Cells: 0 push_button A1 · 1 pick_place A1 · 2 sort_by_color A1
-#        3 push_button A2 · 4 pick_place A2
+# Same run indexing as cluster/train_phase1.sbatch -- index 0-14, cell = i % 5,
+# seed = 1000 + i/5 -- but each array task takes TWO of them:
 #
-# Sizing: cpus-per-task and mem must cover ALL packed runs, not one. Each run uses
-# num_workers=8 and roughly 25 GB of host RAM, so the header below is set for 3 runs
-# (24 CPUs, 128 GB). Packing more than 3 needs both numbers raised, and the node only
-# has 64 CPUs total.
+#   array 0 -> runs 0,1     array 4 -> runs 8,9
+#   array 1 -> runs 2,3     array 5 -> runs 10,11
+#   array 2 -> runs 4,5     array 6 -> runs 12,13
+#   array 3 -> runs 6,7     array 7 -> run  14        (odd one out, runs alone)
 #
-# RISK: the packed runs share one job. If any of them dies -- OOM, CUDA error -- the
-# job exits and takes the others with it, and with save_freq == steps there are no
-# intermediate checkpoints to resume from. Do not pack sort_by_color A1 (~58K steps)
-# with anything unless you are willing to lose it.
+# WHETHER THIS IS FASTER IS NOT SETTLED. On an A6000 it was not: SCRAPE measured two
+# SmolVLA runs sharing a GPU at 2.9 and 3.8 s/step against 1.5 s/step alone, i.e. no
+# throughput gained. A pro6000 is a much bigger GPU and may not saturate on one run --
+# the seed-1000 push_button run measured updt_s 0.318 with data_s 0.013, so the loader
+# is not the limit, but that says nothing about how much SM headroom is left. Compare
+# updt_s here against 0.318: below ~0.64 and packing wins, above it and it loses.
+#
+# RISK: the two runs share one job. If either dies -- OOM, CUDA error -- the job exits
+# and takes the other with it, and with save_freq == steps there are no intermediate
+# checkpoints to resume from.
 #
 #SBATCH --job-name=smolvla-phase1-packed
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=24          # 8 workers x 3 packed runs
+#SBATCH --cpus-per-task=14          # 6 workers x 2 runs, plus room for the main threads
 #SBATCH --mem=128G
-#SBATCH --time=2-00:00:00
-#SBATCH --output=slurm-phase1-packed-%j.out
+#SBATCH --time=1-00:00:00
+#SBATCH --array=0-7%2               # %2 = two GPUs, i.e. four trainings at once
+#SBATCH --output=slurm-phase1-packed-%A_%a.out
 
 set -euo pipefail
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
@@ -35,7 +43,7 @@ export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
 
 if [ "${AUTO_PULL:-1}" = "1" ] && [ -d "$CHECKOUT/.git" ]; then
-  echo "=== auto-pull $CHECKOUT (ff-only) ==="
+  echo "=== auto-pull $CHECKOUT (ff-only, flock-serialized) ==="
   flock "$CHECKOUT/.git" apptainer exec docker://hyeonseoke/lerobot:v1 \
     git -C "$CHECKOUT" pull --ff-only \
     || { echo "FATAL: git pull failed. Fix, or set AUTO_PULL=0."; exit 1; }
@@ -44,31 +52,44 @@ fi
 BODY="$CHECKOUT/cluster/train_phase1_body.sh"
 [ -f "$BODY" ] || { echo "FATAL: $BODY not found."; exit 1; }
 
-CELLS="${CELLS:?CELLS not set. Pass a comma-separated list, e.g. --export=ALL,CELLS=0,3}"
-export SEED="${SEED:-1000}"
+[ -n "${SLURM_ARRAY_TASK_ID:-}" ] || { echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."; exit 1; }
+K="$SLURM_ARRAY_TASK_ID"
 
-echo "=== packing cells [$CELLS] onto one GPU, seed $SEED: $(date) on $(hostname) ==="
+# Two runs share this GPU, so they share the node's CPUs too. 6 workers each instead of
+# 8: the node has 64 CPUs and data_s is 0.013 s against updt_s 0.318, so the loader has
+# an enormous margin and giving some back costs nothing.
+export NUM_WORKERS="${NUM_WORKERS:-6}"
+
+RUNS=()
+for i in $(( K * 2 )) $(( K * 2 + 1 )); do
+  [ "$i" -le 14 ] && RUNS+=("$i")
+done
+[ "${#RUNS[@]}" -gt 0 ] || { echo "FATAL: array index $K maps to no run (valid 0-7)."; exit 1; }
+
+echo "=== packed task $K -> runs ${RUNS[*]} on one GPU: $(date) on $(hostname) ==="
 nvidia-smi
 
-# Each cell runs the shared body in its own PROCESS, not sourced: the body cd's, takes
-# a per-run lock and installs an EXIT trap, so two of them in one shell would collide.
-# Separate processes keep all of that per-run.
+# Each run is its own PROCESS, not sourced: the body cd's, takes a per-run lock and
+# installs an EXIT trap, so two of them in one shell would collide.
 pids=()
-for c in ${CELLS//,/ }; do
-  echo "=== launching cell $c ==="
-  PHASE1_CELL="$c" SEED="$SEED" bash "$BODY" > "phase1_cell${c}_s${SEED}.log" 2>&1 &
+for i in "${RUNS[@]}"; do
+  CELL=$(( i % 5 ))
+  SEED=$(( 1000 + (i / 5) * 1000 ))
+  LOG="phase1_run${i}_cell${CELL}_s${SEED}.log"
+  echo "=== launching run $i (cell $CELL, seed $SEED) -> $LOG ==="
+  PHASE1_CELL="$CELL" SEED="$SEED" NUM_WORKERS="$NUM_WORKERS" bash "$BODY" > "$LOG" 2>&1 &
   pids+=("$!")
-  sleep 20          # stagger: avoid N simultaneous /tmp staging copies thrashing NFS
+  sleep 30      # stagger: two simultaneous /tmp staging copies would fight over NFS
 done
 
-echo "=== ${#pids[@]} runs launched; per-cell output in phase1_cell<N>_s${SEED}.log ==="
+echo "=== ${#pids[@]} run(s) launched; watch the per-run .log files ==="
 
-# Fail the job if ANY packed run fails, but only after they have all finished -- a
-# `wait -n` early exit would leave the survivors orphaned.
+# Fail the task if either run fails, but only once BOTH have finished. A `wait -n` early
+# exit would leave the survivor orphaned and then killed by the job teardown.
 rc=0
 for p in "${pids[@]}"; do
   wait "$p" || rc=1
 done
 
-echo "=== all packed runs done: $(date) (rc=$rc) ==="
+echo "=== packed task $K done: $(date) (rc=$rc) ==="
 exit "$rc"
