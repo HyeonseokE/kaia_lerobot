@@ -38,7 +38,7 @@
 # 20-29 h each and two of them would not fit one walltime. These five are 2-16 h, so
 # each fits its own job with room to spare and there is nothing to serialise.
 #
-# %4 on the --array line runs at most four at once, one per available GPU. Do NOT bother
+# %N on the --array line caps how many run at once -- one GPU each, so %2 = 2 GPUs. Do NOT bother
 # hand-assigning cells to GPUs: sort_by_color A1 is ~16 h on its own and cannot be split,
 # so it sets the finish time no matter how the other four are arranged. ~34 GPU-hours of
 # work, ~16 h wall-clock on 4 GPUs, with one GPU idle at the tail. SLURM packs the rest
@@ -61,7 +61,14 @@
                                     # left over for anything else on that node.
 #SBATCH --mem=128G                  # 64G was OOM-killed mid-run on the towel jobs
 #SBATCH --time=1-00:00:00           # longest run is ~5.1 h; final-only checkpointing
-#SBATCH --array=0-14%4              #   means a walltime kill costs the whole run
+#SBATCH --array=0-14%2              #   means a walltime kill costs the whole run
+                                    # %2 = at most 2 runs at once, i.e. 2 GPUs.
+                                    # Raise to %4 to use the whole partition.
+#
+# To pin the runs to particular NODES, add --nodelist (or --exclude) at submit time:
+#   sbatch --nodelist=p1 cluster/train_phase1.sbatch
+# SLURM has no way to request a particular GPU *index* -- it allocates a GPU from the
+# node and sets CUDA_VISIBLE_DEVICES for you. Node is the finest granularity you get.
                                     # %4 = at most four at once, one per available GPU
 #SBATCH --output=slurm-phase1-%A_%a.out
 

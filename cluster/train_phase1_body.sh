@@ -85,6 +85,11 @@ RENAME="$CAM2"
 # on the Hub (smolvla_phase1_*_A1_10fps, pushed 2026-08-23/24) predate this convention;
 # runs from here land beside them under the new name, they are not overwritten, and
 # nothing cleans them up automatically.
+# Dataloader workers. 8 when this run has a GPU to itself. Packing several runs onto
+# one GPU (cluster/train_phase1_packed.sbatch) lowers it: the node has 64 CPUs, and
+# 8 x 3 packed runs x several jobs does not fit. Cheap to lower -- data_s is 0.013 s
+# against updt_s 0.318, so the loader is nowhere near the bottleneck.
+NUM_WORKERS="${NUM_WORKERS:-8}"
 SEED="${SEED:-1000}"
 case "$SEED" in
   1000|2000|3000) ;;
@@ -273,7 +278,7 @@ apptainer exec --nv "$IMAGE" \
     --policy.scheduler_decay_steps="$STEPS" \
     --save_freq="$SAVE_FREQ" \
     --log_freq=200 \
-    --num_workers=8 \
+    --num_workers="$NUM_WORKERS" \
     --wandb.enable=true \
     --wandb.project=smolvla_phase1
 

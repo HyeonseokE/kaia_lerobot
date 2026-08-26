@@ -90,7 +90,17 @@ sbatch --array=2,7,12 cluster/train_phase1.sbatch    # sort_by_color A1, 세 시
 `train_phase1_body.sh` 의 case 에 행 추가 + 인덱스 산술의 `5` 를 `6` 으로, array 를
 `0-17` 로 바꾸면 된다.
 
-**GPU 배분은 손대지 않는다.** `%4` 가 최대 4개를 동시에 올리고 나머지는 SLURM 이 채운다.
+**동시 실행 수는 `%N` 으로 정한다.** 잡 하나가 GPU 한 장이므로 `%2` = GPU 2장이다.
+현재 `--array=0-14%2`. 파티션 전체를 쓰려면 `%4`.
+
+노드를 지정하려면 제출할 때 `--nodelist` / `--exclude` 를 붙인다:
+
+```
+sbatch --nodelist=p1 cluster/train_phase1.sbatch
+```
+
+**특정 GPU 인덱스는 지정할 수 없다.** SLURM 이 노드에서 GPU 를 골라 할당하고
+`CUDA_VISIBLE_DEVICES` 를 대신 설정한다. 노드가 가장 세밀한 단위다.
 
 `--cpus-per-task=12` 이다 (towel 잡은 16). phase1 은 `num_workers=8` / 카메라 2개라 16은
 슬랙이었고, 실제로 슬롯을 하나 까먹었다 — 2026-08-27 pro6000 한 장과 CPU 정확히 16개가
