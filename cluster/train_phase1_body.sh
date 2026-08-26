@@ -1,8 +1,7 @@
-# SmolVLA on the Phase-1 condition-A1 datasets -- shared body, sourced by
-# cluster/train_phase1.sbatch. This file has NO #SBATCH directives: SLURM reads
-# those only from the submitted wrapper.
+# SmolVLA on the Phase-1 datasets -- shared body, sourced by cluster/train_phase1.sbatch.
+# This file has NO #SBATCH directives: SLURM reads those only from the submitted wrapper.
 #
-# The caller must set PHASE1_TASK (0-2) before sourcing.
+# The caller must set PHASE1_CELL (0-4) before sourcing.
 #
 # These are SCRAPE-IsaacLab ablation_study Phase-1 runs, so the TRAINING arguments
 # follow the SCRAPE phase1 convention exactly (configs/ablation_study/phase1/
@@ -19,7 +18,7 @@
 # The CLUSTER mechanics (apptainer, dataset staging, locking, resume) follow the towel
 # jobs, because those are properties of this cluster and not of the experiment.
 #
-# PREREQUISITE: cluster/main_job_phase1.sbatch has downloaded the three datasets into
+# PREREQUISITE: cluster/main_job_phase1.sbatch has downloaded the five datasets into
 # $HOME/datasets/. This reads only those local copies and never touches the Hub for data.
 
 set -euo pipefail
@@ -46,17 +45,24 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 #
 # Frame counts read from the Hub on 2026-08-26. The guard below recomputes the budget
 # from the staged dataset and refuses to train on a mismatch.
-PHASE1_TASK="${PHASE1_TASK:?PHASE1_TASK not set (0-2). Source this from cluster/train_phase1.sbatch.}"
+# One entry per Phase-1 CELL = task x condition. Five exist; sort_by_color A2 does NOT
+# have a dataset on the Hub (checked 2026-08-26 with an authenticated listing -- the
+# account has exactly these five phase1_* repos), even though
+# configs/ablation_study/phase1/train_smolvla_phase1_sort_by_color_A2_10fps.sh on the
+# SCRAPE box references it at 80,385 frames. Add a row here once it is published.
+PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-4). Source this from cluster/train_phase1.sbatch.}"
 
-case "$PHASE1_TASK" in
-  0) TASK=push_button;    FRAMES=11299; STEPS=8800  ;;
-  1) TASK=pick_place;     FRAMES=31744; STEPS=24800 ;;
-  2) TASK=sort_by_color;  FRAMES=74255; STEPS=58000 ;;
-  *) echo "FATAL: bad PHASE1_TASK='$PHASE1_TASK' (expected 0-2)"; exit 1 ;;
+case "$PHASE1_CELL" in
+  0) TASK=push_button;    COND=A1; FRAMES=11299; STEPS=8800  ;;
+  1) TASK=pick_place;     COND=A1; FRAMES=31744; STEPS=24800 ;;
+  2) TASK=sort_by_color;  COND=A1; FRAMES=74255; STEPS=58000 ;;
+  3) TASK=push_button;    COND=A2; FRAMES=11359; STEPS=8850  ;;
+  4) TASK=pick_place;     COND=A2; FRAMES=30370; STEPS=23700 ;;
+  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-4)"; exit 1 ;;
 esac
 
 HUB_USER=HyeonseokE
-DS="phase1_${TASK}_A1_10fps"
+DS="phase1_${TASK}_${COND}_10fps"
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 
@@ -84,7 +90,7 @@ case "$SEED" in
   1000|2000|3000) ;;
   *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
 esac
-NAME="smolvla_phase1_${TASK}_A1_${SEED}_10fps"
+NAME="smolvla_phase1_${TASK}_${COND}_${SEED}_10fps"
 
 # Final checkpoint only, matching the phase1 scripts.
 #
@@ -93,7 +99,7 @@ NAME="smolvla_phase1_${TASK}_A1_${SEED}_10fps"
 # therefore leaves exactly one, at step == STEPS.
 #
 # TRADE-OFF: no crash recovery -- a walltime kill restarts from step 0. Acceptable here:
-# the longest of the three is ~58K steps (~16 h at the 1.0 s/step this batch size should
+# the longest of the five is ~58K steps (~16 h at the 1.0 s/step this batch size should
 # see on a pro6000) under a 2-day walltime. It also gives the phase1 scripts' publish
 # property for free: push_to_hub uploads only what is saved, so a crashed run publishes
 # nothing.
@@ -196,7 +202,7 @@ echo "${SLURM_JOB_ID:-unknown}" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 echo "=== Job start: $(date) on $(hostname) ==="
-echo "=== Phase-1 A1 / $TASK: $NAME  dataset=$DATASET  frames=$HAVE_FRAMES  steps=$STEPS (50 epochs, batch 64, seed $SEED) ==="
+echo "=== Phase-1 $COND / $TASK: $NAME  dataset=$DATASET  frames=$HAVE_FRAMES  steps=$STEPS (50 epochs, batch 64, seed $SEED) ==="
 nvidia-smi
 
 # ------------------------------------------------------------------- preflight

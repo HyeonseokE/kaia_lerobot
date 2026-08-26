@@ -1,15 +1,21 @@
 #!/bin/bash
-# SmolVLA on the Phase-1 condition-A1 datasets -- array launcher.
+# SmolVLA on the Phase-1 datasets -- array launcher. One array task per CELL
+# (task x condition):
 #
-#   array 0: push_button      11,299 frames ->  8,800 steps
-#   array 1: pick_place       31,744 frames -> 24,800 steps
-#   array 2: sort_by_color    74,255 frames -> 58,000 steps
+#   array 0: push_button   A1   11,299 frames ->  8,800 steps  (~2 h)
+#   array 1: pick_place    A1   31,744 frames -> 24,800 steps  (~7 h)
+#   array 2: sort_by_color A1   74,255 frames -> 58,000 steps  (~16 h)
+#   array 3: push_button   A2   11,359 frames ->  8,850 steps  (~2 h)
+#   array 4: pick_place    A2   30,370 frames -> 23,700 steps  (~7 h)
+#
+# sort_by_color A2 is missing on purpose: no dataset for it exists on the Hub yet.
 #
 # Normally you do NOT submit this by hand -- cluster/main_job_phase1.sbatch prefetches
 # the datasets and then submits it for you. Submit it directly only to re-run a cell
 # whose datasets are already in $HOME/datasets/:
 #
-#   sbatch --array=1 cluster/train_phase1.sbatch      # just pick_place
+#   sbatch --array=1 cluster/train_phase1.sbatch      # just pick_place A1
+#   sbatch --array=3,4 cluster/train_phase1.sbatch    # just the A2 cells
 #
 # SEED selects the training seed (1000 default, 2000 and 3000 also allowed). phase1
 # requires all three per cell -- see phase1_README.md. Seed 1000 keeps the bare run and
@@ -28,7 +34,7 @@
 #SBATCH --cpus-per-task=16          # must exceed --num_workers=8
 #SBATCH --mem=128G                  # 64G was OOM-killed mid-run on the towel jobs
 #SBATCH --time=2-00:00:00           # sort_by_color is ~16 h; final-only checkpointing
-#SBATCH --array=0-2                 #   means a walltime kill costs the whole run
+#SBATCH --array=0-4                 #   means a walltime kill costs the whole run
 #SBATCH --output=slurm-phase1-%A_%a.out
 
 set -euo pipefail
@@ -55,10 +61,10 @@ BODY="$CHECKOUT/cluster/train_phase1_body.sh"
 [ -n "${SLURM_ARRAY_TASK_ID:-}" ] || {
   echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."
   echo "       Resubmit, or launch one cell by hand with:"
-  echo "         sbatch --array=1 cluster/train_phase1.sbatch"
+  echo "         sbatch --array=1 cluster/train_phase1.sbatch"   # 0-4, see the table above
   exit 1
 }
-export PHASE1_TASK="$SLURM_ARRAY_TASK_ID"
+export PHASE1_CELL="$SLURM_ARRAY_TASK_ID"
 export SEED="${SEED:-1000}"
 echo "=== training seed: $SEED ==="
 source "$BODY"

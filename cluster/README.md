@@ -50,20 +50,32 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 
 `train_cap300.sbatch` / `train_cap300_body.sh` 는 `main_job` 이 알아서 쓴다. 손대지 않는다.
 
-### B. SmolVLA — SCRAPE ablation_study Phase-1, condition A1
+### B. SmolVLA — SCRAPE ablation_study Phase-1 (A1 · A2)
 
 | # | 파일 | 비고 |
 |---|---|---|
 | 1 | **`main_job_phase1.sbatch`** | **이것 하나만 던진다.** 0번(git_sync)도 필요 없다 |
 
-`main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 3종 prefetch →
-학습 잡 제출. 체이닝은 없다. 세 셀이 각각 2h/7h/16h 라 한 잡에 하나씩 들어간다.
+`main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 5종 prefetch →
+학습 잡 제출. 체이닝은 없다. 다섯 셀이 각각 2~16h 라 한 잡에 하나씩 들어간다.
 
-| array | task | frames | steps (50 ep) |
-|---|---|---|---|
-| 0 | push_button | 11,299 | 8,800 |
-| 1 | pick_place | 31,744 | 24,800 |
-| 2 | sort_by_color | 74,255 | 58,000 |
+| array | task | 조건 | frames | steps (50 ep) | 예상 |
+|---|---|---|---|---|---|
+| 0 | push_button | A1 | 11,299 | 8,800 | ~2h |
+| 1 | pick_place | A1 | 31,744 | 24,800 | ~7h |
+| 2 | sort_by_color | A1 | 74,255 | 58,000 | ~16h |
+| 3 | push_button | A2 | 11,359 | 8,850 | ~2h |
+| 4 | pick_place | A2 | 30,370 | 23,700 | ~7h |
+
+**sort_by_color A2 는 빠져 있다** — Hub 에 데이터셋이 아직 없다 (2026-08-26 인증 조회 기준
+계정에 phase1_* 레포는 위 5개뿐). SCRAPE 박스에는 80,385 frames 짜리를 참조하는 학습
+스크립트가 이미 있으니, 업로드되면 `train_phase1_body.sh` 의 case 에 행 하나만 추가하면 된다.
+
+한 셀만 다시 돌리려면 array 를 직접 지정한다:
+
+```
+sbatch --array=3,4 cluster/train_phase1.sbatch    # A2 셀만
+```
 
 **학습 인자는 SCRAPE phase1 컨벤션을 따른다** — batch **64**(32 아님), seed 1000,
 50 epoch, torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 를 비교하는
@@ -81,7 +93,7 @@ cap300 은 총합 올림. 서로 베끼지 말 것.
 sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
 ```
 
-모델 레포는 `smolvla_phase1_<task>_A1_<seed>_10fps` — 시드가 조건과 `10fps` 사이에
+모델 레포는 `smolvla_phase1_<task>_<조건>_<seed>_10fps` — 시드가 조건과 `10fps` 사이에
 들어가므로 세 런이 서로 덮어쓰지 않는다.
 
 ### C. SmolVLA — towel_fold01, delta action

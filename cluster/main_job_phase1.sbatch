@@ -1,5 +1,5 @@
 #!/bin/bash
-# SmolVLA on the Phase-1 condition-A1 datasets -- SINGLE ENTRY POINT.
+# SmolVLA on the Phase-1 datasets (conditions A1 and A2) -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -7,8 +7,8 @@
 # This one job does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. prefetch   -- download the three datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the three training jobs and exit
+#   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
+#   4. submit     -- queue the five training jobs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -17,12 +17,18 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the jobs this one queues -- three independent cells,
-# no chaining (see cluster/train_phase1.sbatch for why):
+# The GPU work proper happens in the jobs this one queues -- five independent cells
+# (task x condition), no chaining (see cluster/train_phase1.sbatch for why):
 #
-#   push_button      11,299 frames ->  8,800 steps  (~2 h)
-#   pick_place       31,744 frames -> 24,800 steps  (~7 h)
-#   sort_by_color    74,255 frames -> 58,000 steps  (~16 h)
+#   push_button   A1   11,299 frames ->  8,800 steps  (~2 h)
+#   pick_place    A1   31,744 frames -> 24,800 steps  (~7 h)
+#   sort_by_color A1   74,255 frames -> 58,000 steps  (~16 h)
+#   push_button   A2   11,359 frames ->  8,850 steps  (~2 h)
+#   pick_place    A2   30,370 frames -> 23,700 steps  (~7 h)
+#
+# sort_by_color A2 is absent because no dataset for it exists on the Hub yet -- the
+# account has exactly five phase1_* repos as of 2026-08-26, even though the SCRAPE box
+# already has a training script referencing an 80,385-frame sort_by_color A2 set.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -121,12 +127,14 @@ from huggingface_hub import hf_hub_download, snapshot_download
 
 ROOT = Path(os.environ["DATASETS_DIR"])
 
-# SCRAPE-IsaacLab ablation_study Phase-1, condition A1. All three: 100 episodes,
+# SCRAPE-IsaacLab ablation_study Phase-1, conditions A1 and A2. All five: 100 episodes,
 # 20 layout seeds x 5, 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
 REPOS = [
     "HyeonseokE/phase1_push_button_A1_10fps",
     "HyeonseokE/phase1_pick_place_A1_10fps",
     "HyeonseokE/phase1_sort_by_color_A1_10fps",
+    "HyeonseokE/phase1_push_button_A2_10fps",
+    "HyeonseokE/phase1_pick_place_A2_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
