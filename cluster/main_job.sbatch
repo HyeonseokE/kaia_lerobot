@@ -10,8 +10,15 @@
 #   3. prefetch   -- download the four datasets ONCE into $HOME/datasets/
 #   4. submit     -- queue the training chains and exit
 #
-# It asks for no GPU and holds a small allocation only for the download; the GPU work
-# happens in the jobs it queues:
+# It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
+# anyway. Without --gres this job sits in the queue forever with
+#   Reason: Nodes required for job are DOWN, DRAINED or reserved for jobs in
+#           higher priority partitions
+# because the gpu partition's nodes are reserved for higher-priority GPU work and a
+# 0-GPU job never qualifies for them. prefetch.sbatch requests a GPU for the same
+# reason even though it also only downloads. Keep the line.
+#
+# The GPU work proper happens in the jobs this one queues:
 #
 #   GPU A (array 0):  push_cube_cap_10fps  --afterok-->  extract_cube_cap_10fps
 #   GPU B (array 1):  close_box_cap_10fps  --afterok-->  open_box_cap_10fps
@@ -25,6 +32,7 @@
 #
 #SBATCH --job-name=cap300-main
 #SBATCH --partition=gpu
+#SBATCH --gres=gpu:pro6000:1        # never used -- see below
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=06:00:00
