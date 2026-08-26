@@ -1,12 +1,23 @@
 #!/bin/bash
-# SmolVLA on the Phase-1 datasets -- array launcher. One array task per CELL
-# (task x condition):
+# SmolVLA on the Phase-1 datasets -- array launcher. One array task per RUN, where a
+# run is a cell (task x condition) at one training seed. Phase-1 needs all three seeds
+# per cell, so 5 cells x 3 seeds = 15 runs, and the array index encodes both:
 #
-#   array 0: push_button   A1   11,299 frames ->  8,800 steps  (~2 h)
-#   array 1: pick_place    A1   31,744 frames -> 24,800 steps  (~7 h)
-#   array 2: sort_by_color A1   74,255 frames -> 58,000 steps  (~16 h)
-#   array 3: push_button   A2   11,359 frames ->  8,850 steps  (~2 h)
-#   array 4: pick_place    A2   30,370 frames -> 23,700 steps  (~7 h)
+#   cell = index % 5           0 push_button A1     8,800 steps  (~47 min)
+#   seed = 1000 + index/5      1 pick_place   A1   24,800 steps  (~2.2 h)
+#                              2 sort_by_color A1  58,000 steps  (~5.1 h)
+#                              3 push_button  A2    8,850 steps  (~47 min)
+#                              4 pick_place   A2   23,700 steps  (~2.1 h)
+#
+#   index  0-4   seed 1000
+#   index  5-9   seed 2000
+#   index 10-14  seed 3000
+#
+# Times are from the measured 0.318 s/step on a pro6000 (batch 64, 2 cameras, seed-1000
+# push_button run on 2026-08-27), not an estimate. ~33 GPU-hours for the whole grid.
+#
+# Subsetting falls out of the encoding -- --array=5-9 is "all of seed 2000",
+# --array=2,7,12 is "sort_by_color A1 at every seed".
 #
 # sort_by_color A2 is missing on purpose: it has not been collected yet. These five are
 # the complete set until it is.
@@ -15,14 +26,13 @@
 # the datasets and then submits it for you. Submit it directly only to re-run a cell
 # whose datasets are already in $HOME/datasets/:
 #
-#   sbatch --array=1 cluster/train_phase1.sbatch      # just pick_place A1
-#   sbatch --array=3,4 cluster/train_phase1.sbatch    # just the A2 cells
+#   sbatch --array=1 cluster/train_phase1.sbatch       # pick_place A1, seed 1000
+#   sbatch --array=5-9 cluster/train_phase1.sbatch    # every cell at seed 2000
+#   sbatch --array=2,7,12 cluster/train_phase1.sbatch # sort_by_color A1, all 3 seeds
 #
-# SEED selects the training seed (1000 default, 2000 and 3000 also allowed). phase1
-# requires all three per cell -- see phase1_README.md. The seed goes in the run dir and
-# the model repo (smolvla_phase1_<task>_<cond>_<seed>_10fps), so they never collide:
-#
-#   sbatch --export=ALL,SEED=2000 cluster/train_phase1.sbatch
+# The seed goes in the run dir and the model repo
+# (smolvla_phase1_<task>_<cond>_<seed>_10fps), so runs never collide -- which is what
+# makes it safe to have all 15 in flight at once.
 #
 # NOT chained, unlike train_cap300.sbatch. Chaining exists there because those runs are
 # 20-29 h each and two of them would not fit one walltime. These five are 2-16 h, so
@@ -50,8 +60,8 @@
                                     # schedule (Reason: Resources) because nothing was
                                     # left over for anything else on that node.
 #SBATCH --mem=128G                  # 64G was OOM-killed mid-run on the towel jobs
-#SBATCH --time=2-00:00:00           # sort_by_color is ~16 h; final-only checkpointing
-#SBATCH --array=0-4%4               #   means a walltime kill costs the whole run
+#SBATCH --time=1-00:00:00           # longest run is ~5.1 h; final-only checkpointing
+#SBATCH --array=0-14%4              #   means a walltime kill costs the whole run
                                     # %4 = at most four at once, one per available GPU
 #SBATCH --output=slurm-phase1-%A_%a.out
 
@@ -78,11 +88,14 @@ BODY="$CHECKOUT/cluster/train_phase1_body.sh"
 # a run, and three jobs re-ran an already-finished step.
 [ -n "${SLURM_ARRAY_TASK_ID:-}" ] || {
   echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."
-  echo "       Resubmit, or launch one cell by hand with:"
-  echo "         sbatch --array=1 cluster/train_phase1.sbatch"   # 0-4, see the table above
+  echo "       Resubmit, or launch one run by hand with:"
+  echo "         sbatch --array=1 cluster/train_phase1.sbatch"   # 0-14, see the table above
   exit 1
 }
-export PHASE1_CELL="$SLURM_ARRAY_TASK_ID"
-export SEED="${SEED:-1000}"
-echo "=== training seed: $SEED ==="
+IDX="$SLURM_ARRAY_TASK_ID"
+[ "$IDX" -ge 0 ] && [ "$IDX" -le 14 ] || { echo "FATAL: array index $IDX out of range (0-14)."; exit 1; }
+
+export PHASE1_CELL=$(( IDX % 5 ))
+export SEED=$(( 1000 + (IDX / 5) * 1000 ))
+echo "=== array index $IDX -> cell $PHASE1_CELL, seed $SEED ==="
 source "$BODY"

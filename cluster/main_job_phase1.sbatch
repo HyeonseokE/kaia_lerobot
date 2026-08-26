@@ -8,7 +8,7 @@
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
 #   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the five training jobs and exit
+#   4. submit     -- queue all 15 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -17,14 +17,20 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the jobs this one queues -- five independent cells
-# (task x condition), no chaining (see cluster/train_phase1.sbatch for why):
+# The GPU work proper happens in the jobs this one queues: 5 cells (task x condition)
+# x 3 training seeds = 15 independent runs, no chaining. phase1_README.md requires all
+# three seeds per cell -- the unit of analysis is the training run, not the rollout --
+# so submitting one seed at a time was always going to mean three trips. One array
+# covers the grid; the index encodes cell and seed (see cluster/train_phase1.sbatch).
 #
-#   push_button   A1   11,299 frames ->  8,800 steps  (~2 h)
-#   pick_place    A1   31,744 frames -> 24,800 steps  (~7 h)
-#   sort_by_color A1   74,255 frames -> 58,000 steps  (~16 h)
-#   push_button   A2   11,359 frames ->  8,850 steps  (~2 h)
-#   pick_place    A2   30,370 frames -> 23,700 steps  (~7 h)
+#   push_button   A1   11,299 frames ->  8,800 steps  (~47 min)
+#   pick_place    A1   31,744 frames -> 24,800 steps  (~2.2 h)
+#   sort_by_color A1   74,255 frames -> 58,000 steps  (~5.1 h)
+#   push_button   A2   11,359 frames ->  8,850 steps  (~47 min)
+#   pick_place    A2   30,370 frames -> 23,700 steps  (~2.1 h)
+#
+# x3 seeds = ~33 GPU-hours. Times are measured (0.318 s/step on a pro6000, batch 64,
+# 2026-08-27), not estimated.
 #
 # sort_by_color A2 is absent because it has not been collected yet. These five are the
 # complete set until it is. (The SCRAPE box already carries a training script for it,
@@ -39,13 +45,12 @@
 # Step 4 refuses to run if phase1 jobs for THIS seed are already queued, so a resubmit
 # will not create duplicates.
 #
-# SEED picks the training seed; phase1_README.md requires 1000, 2000 and 3000 for every
-# cell, reported as mean +/- std over seeds. Default here is 1000. For the others:
+# All three seeds go in one submission -- no SEED env var to set. The seed lands in the
+# model repo name (smolvla_phase1_<task>_<cond>_<seed>_10fps, the same slot
+# ablation_study uses), so the 15 runs never collide with each other.
 #
-#   sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
-#
-# The seed goes in the model repo name -- smolvla_phase1_<task>_A1_<seed>_10fps, the
-# same slot ablation_study uses -- so the three runs never overwrite each other.
+# To run a subset instead, submit cluster/train_phase1.sbatch directly with an explicit
+# --array (its header has the index table).
 #
 # NOTE: the seed-LESS repos on the Hub (smolvla_phase1_*_A1_10fps, pushed 2026-08-23/24)
 # predate that convention. Runs from here land beside them under the new name rather
@@ -78,13 +83,7 @@ mkdir -p "$APPTAINER_CACHEDIR"
 # ------------------------------------------------------------------ 1. preflight
 # Check the tokens NOW, not after the downloads. The training jobs need both and die
 # instantly without them; there is no point prefetching first.
-SEED="${SEED:-1000}"
-case "$SEED" in
-  1000|2000|3000) ;;
-  *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
-esac
-
-echo "=== [1/4] preflight (seed $SEED) ==="
+echo "=== [1/4] preflight ==="
 for f in ~/.wandb_token ~/.hf_token; do
   [ -s "$f" ] || { echo "FATAL: $f is missing or empty. Create it in the OOD Files app."; exit 1; }
 done
@@ -189,19 +188,19 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit training jobs (seed $SEED) ==="
-# Per-seed, not per-experiment: seeds 1000/2000/3000 write to different run dirs and Hub
-# repos, so a 2000 run is not a duplicate of a queued 1000 run.
-JOBNAME="smolvla-phase1-s${SEED}"
+echo "=== [4/4] submit all 15 training runs (5 cells x seeds 1000/2000/3000) ==="
+JOBNAME="smolvla-phase1"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING phase1 seed-$SEED training job(s) are already queued or running."
-  echo "       Refusing to submit duplicates. Cancel them first if you meant to restart:"
+  echo "FATAL: $RUNNING phase1 training job(s) are already queued or running."
+  echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
+  echo "       or submit just the missing runs with an explicit --array:"
+  echo "         sbatch --array=5-14 cluster/train_phase1.sbatch"
   squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E "JOBID|${JOBNAME}"
   exit 1
 fi
 
-sbatch --job-name="$JOBNAME" --export=ALL,SEED="$SEED" "$TRAIN_JOB"
+sbatch --job-name="$JOBNAME" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'

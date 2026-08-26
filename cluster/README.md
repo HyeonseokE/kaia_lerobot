@@ -59,52 +59,50 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 `main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 5종 prefetch →
 학습 잡 제출. 체이닝은 없다. 다섯 셀이 각각 2~16h 라 한 잡에 하나씩 들어간다.
 
-| array | task | 조건 | frames | steps (50 ep) | 예상 |
+**한 번 던지면 15런(5셀 × 3시드)이 전부 큐에 들어간다.** array 인덱스가 셀과 시드를
+같이 인코딩한다 — `cell = idx % 5`, `seed = 1000 + idx/5`.
+
+| cell | task | 조건 | frames | steps | 실측 소요 |
 |---|---|---|---|---|---|
-| 0 | push_button | A1 | 11,299 | 8,800 | ~2h |
-| 1 | pick_place | A1 | 31,744 | 24,800 | ~7h |
-| 2 | sort_by_color | A1 | 74,255 | 58,000 | ~16h |
-| 3 | push_button | A2 | 11,359 | 8,850 | ~2h |
-| 4 | pick_place | A2 | 30,370 | 23,700 | ~7h |
+| 0 | push_button | A1 | 11,299 | 8,800 | ~47분 |
+| 1 | pick_place | A1 | 31,744 | 24,800 | ~2.2h |
+| 2 | sort_by_color | A1 | 74,255 | 58,000 | ~5.1h |
+| 3 | push_button | A2 | 11,359 | 8,850 | ~47분 |
+| 4 | pick_place | A2 | 30,370 | 23,700 | ~2.1h |
 
-**sort_by_color A2 는 아직 수집 전이다.** 위 5개가 현재 전부다. 수집되면
-`train_phase1_body.sh` 의 case 에 행 하나 추가하고 array 를 `0-5` 로 늘리면 된다.
+```
+idx  0-4   seed 1000        전체 ~33 GPU-hours
+idx  5-9   seed 2000        GPU 3~4장이면 ~11h
+idx 10-14  seed 3000
+```
 
-**GPU 배분은 손대지 않는다.** `--array=0-4%4` 가 GPU 4장에 최대 4개를 동시에 올린다.
-셀을 GPU 에 수동 배정할 이유가 없다 — sort_by_color A1 이 혼자 ~16h 이고 쪼갤 수 없어서
-나머지를 어떻게 배열하든 종료 시각을 그게 정한다. 총 ~34 GPU-hours, 4장이면 **~16h**,
-꼬리에서 GPU 한 장이 논다. 나머지는 SLURM 이 알아서 채운다 (task 4 는 ~2h 짜리가 슬롯을
-비우는 t+2h 쯤 시작해 sort_by_color 보다 훨씬 먼저 끝난다).
+소요 시간은 실측이다 — pro6000 에서 `updt_s:0.318` (batch 64, 카메라 2개, 2026-08-27).
+`--time` 은 1일이면 충분하다.
+
+부분 실행은 array 를 직접 지정한다:
+
+```
+sbatch --array=5-9 cluster/train_phase1.sbatch       # seed 2000 전부
+sbatch --array=2,7,12 cluster/train_phase1.sbatch    # sort_by_color A1, 세 시드
+```
+
+**sort_by_color A2 는 아직 수집 전이다.** 위 5셀이 현재 전부다. 수집되면
+`train_phase1_body.sh` 의 case 에 행 추가 + 인덱스 산술의 `5` 를 `6` 으로, array 를
+`0-17` 로 바꾸면 된다.
+
+**GPU 배분은 손대지 않는다.** `%4` 가 최대 4개를 동시에 올리고 나머지는 SLURM 이 채운다.
 
 `--cpus-per-task=12` 이다 (towel 잡은 16). phase1 은 `num_workers=8` / 카메라 2개라 16은
 슬랙이었고, 실제로 슬롯을 하나 까먹었다 — 2026-08-27 pro6000 한 장과 CPU 정확히 16개가
 비어 있는데도 task 3 이 `Reason: Resources` 로 못 들어갔다. **`num_workers` 를 올리면
 이 값도 같이 올려야 한다.**
 
-한 셀만 다시 돌리려면 array 를 직접 지정한다:
+**학습 인자는 SCRAPE phase1 컨벤션을 따른다** — batch **64**(32 아님), 50 epoch,
+torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 를 비교하는 실험이고,
+모든 셀을 동일하게 학습해야 비교가 성립한다. `train_cap300_body.sh` 의 숫자와 "통일"하지
+말 것 — step 공식도 다르다 (phase1 은 `floor(frames/64) × 50`, cap300 은 총합 올림).
 
-```
-sbatch --array=3,4 cluster/train_phase1.sbatch    # A2 셀만
-```
-
-**학습 인자는 SCRAPE phase1 컨벤션을 따른다** — batch **64**(32 아님), seed 1000,
-50 epoch, torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 를 비교하는
-실험이고, 모든 셀을 동일하게 학습해야 비교가 성립한다. SCRAPE 박스에서 이미 batch 64 로
-돌린 셀들이 있으므로 여기서 batch 32 로 돌리면 그것들과 비교 불가다.
-`train_cap300_body.sh` 의 숫자와 "통일"하지 말 것.
-
-step 공식도 다르다 — phase1 은 `floor(frames/64) × 50` (에포크당 내림 후 곱셈),
-cap300 은 총합 올림. 서로 베끼지 말 것.
-
-시드는 1000 / 2000 / 3000 세 번을 다 돌려야 한다 (phase1_README.md — 분석 단위가
-롤아웃이 아니라 training run 이라 셀당 ≥3 시드 mean±std 로 보고한다). 기본은 1000:
-
-```
-sbatch --export=ALL,SEED=2000 cluster/main_job_phase1.sbatch
-```
-
-모델 레포는 `smolvla_phase1_<task>_<조건>_<seed>_10fps` — 시드가 조건과 `10fps` 사이에
-들어가므로 세 런이 서로 덮어쓰지 않는다.
+모델 레포는 `smolvla_phase1_<task>_<조건>_<seed>_10fps`.
 
 ### C. SmolVLA — towel_fold01, delta action
 
