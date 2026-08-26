@@ -76,6 +76,11 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 꼬리에서 GPU 한 장이 논다. 나머지는 SLURM 이 알아서 채운다 (task 4 는 ~2h 짜리가 슬롯을
 비우는 t+2h 쯤 시작해 sort_by_color 보다 훨씬 먼저 끝난다).
 
+`--cpus-per-task=12` 이다 (towel 잡은 16). phase1 은 `num_workers=8` / 카메라 2개라 16은
+슬랙이었고, 실제로 슬롯을 하나 까먹었다 — 2026-08-27 pro6000 한 장과 CPU 정확히 16개가
+비어 있는데도 task 3 이 `Reason: Resources` 로 못 들어갔다. **`num_workers` 를 올리면
+이 값도 같이 올려야 한다.**
+
 한 셀만 다시 돌리려면 array 를 직접 지정한다:
 
 ```

@@ -41,7 +41,14 @@
 #SBATCH --job-name=smolvla-phase1
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=16          # must exceed --num_workers=8
+#SBATCH --cpus-per-task=12          # must exceed --num_workers=8
+                                    # Was 16, copied from the towel jobs, which run 12
+                                    # dataloader workers over 3 cameras. Phase-1 runs 8
+                                    # over 2, so 16 was slack -- and it cost a slot:
+                                    # 2026-08-27 the partition had a free pro6000 and
+                                    # exactly 16 free CPUs, and task 3 still would not
+                                    # schedule (Reason: Resources) because nothing was
+                                    # left over for anything else on that node.
 #SBATCH --mem=128G                  # 64G was OOM-killed mid-run on the towel jobs
 #SBATCH --time=2-00:00:00           # sort_by_color is ~16 h; final-only checkpointing
 #SBATCH --array=0-4%4               #   means a walltime kill costs the whole run
