@@ -26,9 +26,13 @@
 #   push_button   A2   11,359 frames ->  8,850 steps  (~2 h)
 #   pick_place    A2   30,370 frames -> 23,700 steps  (~7 h)
 #
-# sort_by_color A2 is absent because no dataset for it exists on the Hub yet -- the
-# account has exactly five phase1_* repos as of 2026-08-26, even though the SCRAPE box
-# already has a training script referencing an 80,385-frame sort_by_color A2 set.
+# sort_by_color A2 is absent because it has not been collected yet. These five are the
+# complete set until it is. (The SCRAPE box already carries a training script for it,
+# referencing an 80,385-frame set -- written ahead of collection.)
+#
+# The array caps at 4 concurrent, one per available GPU. Hand-assigning cells to GPUs
+# would not help: sort_by_color A1 is ~16 h on its own and cannot be split, so it sets
+# the finish time whatever the other four do. ~34 GPU-hours total, ~16 h wall-clock.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
