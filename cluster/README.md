@@ -138,6 +138,17 @@ idx 8-11  seed 3000
 모델 레포는 `smolvla_<task>_cap_<seed>_10fps` — `configs/benchmark_table/README.md` 의
 명명 규칙 그대로다.
 
+**GPU 한 장에 2개씩 올리려면** `PACKED=1` 을 붙인다. GPU 2장 × 2학습 = 동시 4개,
+12런이 6웨이브가 아니라 **3웨이브**로 끝난다:
+
+```
+sbatch --export=ALL,PACKED=1 cluster/main_job_bench_cap.sbatch
+```
+
+단 **빨라진다는 보장은 없다.** A6000 에서는 두 개를 한 GPU 에 올리자 1.5 → 2.9/3.8 s/step
+으로 총 처리량이 그대로였다. pro6000 은 다를 수 있으니 `updt_s` 를 0.318 과 비교할 것 —
+0.64 미만이면 이득, 초과면 손해다. 그리고 두 학습이 한 잡이라 하나가 죽으면 둘 다 죽는다.
+
 **A 의 `main_job.sbatch` 와 혼동하지 말 것.** 그쪽은 다른 네 개의 `*_cap_10fps` 를
 **300 epoch / batch 32** 로 돌리고 이름도 `smolvla_<ds>_300ep` 다. 별개의 일회성 실험이고
 benchmark table 셀이 아니다. 이쪽은 **50 epoch / batch 64** — pick_place·push_button·

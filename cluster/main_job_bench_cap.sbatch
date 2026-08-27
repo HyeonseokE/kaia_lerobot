@@ -41,6 +41,12 @@
 # To run a subset instead, submit cluster/train_bench_cap.sbatch directly with an
 # explicit --array (its header has the index table).
 #
+# PACKED=1 submits cluster/train_bench_cap_packed.sbatch instead, which puts TWO runs on
+# each GPU -- 4 trainings at once on 2 GPUs, three waves instead of six. Read that file's
+# header first: on an A6000 packing gained nothing, and both runs share one job's fate.
+#
+#   sbatch --export=ALL,PACKED=1 cluster/main_job_bench_cap.sbatch
+#
 # This is the CaP arm. It is NOT cluster/main_job.sbatch, which trains four other
 # *_cap_10fps datasets for 300 epochs at batch 32 under the name smolvla_<ds>_300ep --
 # a separate one-off, not a benchmark-table cell.
@@ -92,7 +98,12 @@ else
 fi
 echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --abbrev-ref HEAD) @ $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --short HEAD) ==="
 
-TRAIN_JOB="$CHECKOUT/cluster/train_bench_cap.sbatch"
+if [ "${PACKED:-0}" = "1" ]; then
+  TRAIN_JOB="$CHECKOUT/cluster/train_bench_cap_packed.sbatch"
+  echo "=== PACKED=1: two runs per GPU ==="
+else
+  TRAIN_JOB="$CHECKOUT/cluster/train_bench_cap.sbatch"
+fi
 for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_bench_cap_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
@@ -177,7 +188,7 @@ PY
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
 echo "=== [4/4] submit all 12 training runs (4 tasks x seeds 1000/2000/3000) ==="
-JOBNAME="smolvla-bench-cap"
+JOBNAME="smolvla-bench-cap"     # the packed launcher's name starts with this too
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
   echo "FATAL: $RUNNING bench-cap training job(s) are already queued or running."
