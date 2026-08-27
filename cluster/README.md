@@ -19,8 +19,8 @@ OOD Job Composer → New Job → 파일 내용을 붙여넣고 Submit. `#SBATCH`
 
 ## 실험별 — 무엇을 어떤 순서로
 
-C 와 D 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
-`FATAL: ... _body.sh not found` 로 즉사한다. A·B 는 `main_job*.sbatch` 가 클론까지 하므로
+D 와 E 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
+`FATAL: ... _body.sh not found` 로 즉사한다. A·B·C 는 `main_job*.sbatch` 가 클론까지 하므로
 0번이 필요 없다.
 
 | # | 파일 | 언제 |
@@ -114,7 +114,37 @@ torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 
 
 모델 레포는 `smolvla_phase1_<task>_<조건>_<seed>_10fps`.
 
-### C. SmolVLA — towel_fold01, delta action
+### C. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_bench_cap.sbatch`** | **이것 하나만 던진다.** 0번(git_sync)도 필요 없다 |
+
+한 번 던지면 12런이 전부 큐에 들어간다. `cell = idx % 4`, `seed = 1000 + idx/4`.
+
+| cell | task | frames | steps | 실측 소요 |
+|---|---|---|---|---|
+| 0 | pull_cube | 31,714 | 24,750 | ~2.2h |
+| 1 | stack_2_cubes | 37,245 | 29,050 | ~2.6h |
+| 2 | turn_off_lever | 21,317 | 16,650 | ~1.5h |
+| 3 | turn_on_lever | 20,962 | 16,350 | ~1.4h |
+
+```
+idx 0-3   seed 1000     총 ~23 GPU-hours
+idx 4-7   seed 2000     %2 (GPU 2장) 로 ~12h
+idx 8-11  seed 3000
+```
+
+모델 레포는 `smolvla_<task>_cap_<seed>_10fps` — `configs/benchmark_table/README.md` 의
+명명 규칙 그대로다.
+
+**A 의 `main_job.sbatch` 와 혼동하지 말 것.** 그쪽은 다른 네 개의 `*_cap_10fps` 를
+**300 epoch / batch 32** 로 돌리고 이름도 `smolvla_<ds>_300ep` 다. 별개의 일회성 실험이고
+benchmark table 셀이 아니다. 이쪽은 **50 epoch / batch 64** — pick_place·push_button·
+sort_by_color 의 CaP 셀이 재사용하는 `ablation_*` 모델과 같은 예산이어야 표의 행이
+비교 가능하기 때문이다.
+
+### D. SmolVLA — towel_fold01, delta action
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -122,7 +152,7 @@ torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 
 | 2 | `train_delta_step{0,1,2,3}.sbatch` | 스텝 하나만 띄울 때. 이쪽을 기본으로 |
 | 2' | `train_delta.sbatch` | 여러 스텝을 한 번에 (`--array`). 이미 도는 스텝은 넣지 말 것 |
 
-### D. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
+### E. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -135,8 +165,8 @@ torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 
    OOD Files 앱으로 만든다. 없으면 학습 잡이 시작 직후 FATAL.
 2. 수정한 스크립트가 **GitHub `main` 에 push 되어 있을 것**. 잡은 `$HOME/lerobot` 을
    `git pull --ff-only` 로 갱신해서 `_body.sh` 와 `src/lerobot` 을 읽는다.
-3. (C·D) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
-   `FATAL: $HOME/datasets/... not found`. A·B 는 `main_job*.sbatch` 가 순서를 보장한다.
+3. (D·E) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
+   `FATAL: $HOME/datasets/... not found`. A·B·C 는 `main_job*.sbatch` 가 순서를 보장한다.
 
 ## 자동 pull 이 닿지 않는 곳 — 함정
 
