@@ -41,11 +41,16 @@
 # To run a subset instead, submit cluster/train_bench_cap.sbatch directly with an
 # explicit --array (its header has the index table).
 #
-# PACKED=1 submits cluster/train_bench_cap_packed.sbatch instead, which puts TWO runs on
-# each GPU -- 4 trainings at once on 2 GPUs, three waves instead of six. Read that file's
-# header first: on an A6000 packing gained nothing, and both runs share one job's fate.
+# By default this submits cluster/train_bench_cap_packed.sbatch, which puts TWO runs on
+# each GPU: 4 trainings at once across 2 GPUs, three waves instead of six.
 #
-#   sbatch --export=ALL,PACKED=1 cluster/main_job_bench_cap.sbatch
+# Whether that is actually faster is not settled -- on an A6000 packing gained nothing
+# (two shared runs measured 2.9 and 3.8 s/step against 1.5 alone), and the two runs share
+# one job's fate, so either one dying takes the other with it. Compare updt_s against the
+# 0.318 the unpacked runs measured: below ~0.64 packing wins, above it packing loses.
+# To go back to one run per GPU:
+#
+#   sbatch --export=ALL,PACKED=0 cluster/main_job_bench_cap.sbatch
 #
 # This is the CaP arm. It is NOT cluster/main_job.sbatch, which trains four other
 # *_cap_10fps datasets for 300 epochs at batch 32 under the name smolvla_<ds>_300ep --
@@ -98,11 +103,15 @@ else
 fi
 echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --abbrev-ref HEAD) @ $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --short HEAD) ==="
 
-if [ "${PACKED:-0}" = "1" ]; then
+# Packed by DEFAULT: two runs per GPU, so at the launcher's %2 that is 2 GPUs x 2
+# trainings = 4 in parallel and the 12 runs clear in three waves. PACKED=0 falls back to
+# one run per GPU (six waves).
+if [ "${PACKED:-1}" = "1" ]; then
   TRAIN_JOB="$CHECKOUT/cluster/train_bench_cap_packed.sbatch"
-  echo "=== PACKED=1: two runs per GPU ==="
+  echo "=== PACKED: two runs per GPU, four trainings in parallel ==="
 else
   TRAIN_JOB="$CHECKOUT/cluster/train_bench_cap.sbatch"
+  echo "=== PACKED=0: one run per GPU ==="
 fi
 for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_bench_cap_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }

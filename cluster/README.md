@@ -138,11 +138,11 @@ idx 8-11  seed 3000
 모델 레포는 `smolvla_<task>_cap_<seed>_10fps` — `configs/benchmark_table/README.md` 의
 명명 규칙 그대로다.
 
-**GPU 한 장에 2개씩 올리려면** `PACKED=1` 을 붙인다. GPU 2장 × 2학습 = 동시 4개,
-12런이 6웨이브가 아니라 **3웨이브**로 끝난다:
+**기본이 GPU 한 장에 2개씩이다.** GPU 2장 × 2학습 = 동시 4개, 12런이 3웨이브로 끝난다.
+한 장에 하나씩 돌리려면 `PACKED=0`:
 
 ```
-sbatch --export=ALL,PACKED=1 cluster/main_job_bench_cap.sbatch
+sbatch --export=ALL,PACKED=0 cluster/main_job_bench_cap.sbatch
 ```
 
 단 **빨라진다는 보장은 없다.** A6000 에서는 두 개를 한 GPU 에 올리자 1.5 → 2.9/3.8 s/step
