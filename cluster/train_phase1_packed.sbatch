@@ -9,13 +9,15 @@
 #   sbatch cluster/train_phase1_packed.sbatch                 # the whole 15-run grid
 #   sbatch --array=0-3 cluster/train_phase1_packed.sbatch     # first 8 runs only
 #
-# Same run indexing as cluster/train_phase1.sbatch -- index 0-14, cell = i % 5,
-# seed = 1000 + i/5 -- but each array task takes TWO of them:
+Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
+#        3 push_button A2 | 4 pick_place A2
 #
-#   array 0 -> runs 0,1     array 4 -> runs 8,9
-#   array 1 -> runs 2,3     array 5 -> runs 10,11
-#   array 2 -> runs 4,5     array 6 -> runs 12,13
-#   array 3 -> runs 6,7     array 7 -> run  14        (odd one out, runs alone)
+# The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes two of
+# it, so --array=0-7 covers all 15. PHASE1_CELLS picks a subset -- the list shortens and
+# the high tasks become no-ops, no --array change needed:
+#
+#   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/train_phase1_packed.sbatch
+#     -> push_button A1, pick_place A1, push_button A2 at all three seeds = 9 runs
 #
 # WHETHER THIS IS FASTER IS NOT SETTLED. On an A6000 it was not: SCRAPE measured two
 # SmolVLA runs sharing a GPU at 2.9 and 3.8 s/step against 1.5 s/step alone, i.e. no
@@ -60,23 +62,44 @@ K="$SLURM_ARRAY_TASK_ID"
 # data_s is 0.013 s against updt_s 0.318, so the loader has an enormous margin.
 export NUM_WORKERS="${NUM_WORKERS:-8}"
 
-RUNS=()
-for i in $(( K * 2 )) $(( K * 2 + 1 )); do
-  [ "$i" -le 14 ] && RUNS+=("$i")
-done
-[ "${#RUNS[@]}" -gt 0 ] || { echo "FATAL: array index $K maps to no run (valid 0-7)."; exit 1; }
+# PHASE1_CELLS restricts which cells take part. Default is all five. The run list is
+# built cell-major within each seed, in the order given, and this task takes the two
+# entries at positions 2K and 2K+1 -- so a shorter list simply leaves the high array
+# tasks with nothing to do, and they exit 0 rather than failing. That is what lets one
+# static --array=0-7 line serve any subset:
+#
+#   PHASE1_CELLS=0,1,3  ->  9 runs  ->  tasks 0-4 work, tasks 5-7 are no-ops
+#   PHASE1_CELLS=2      ->  3 runs  ->  tasks 0-1 work, the rest are no-ops
+PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4}"
 
-echo "=== packed task $K -> runs ${RUNS[*]} on one GPU: $(date) on $(hostname) ==="
+ALL=()
+for sd in 1000 2000 3000; do
+  for c in ${PHASE1_CELLS//,/ }; do
+    [ "$c" -ge 0 ] && [ "$c" -le 4 ] || { echo "FATAL: PHASE1_CELLS has '$c' (valid 0-4)."; exit 1; }
+    ALL+=("${c}:${sd}")
+  done
+done
+
+RUNS=()
+for n in $(( K * 2 )) $(( K * 2 + 1 )); do
+  [ "$n" -lt "${#ALL[@]}" ] && RUNS+=("${ALL[$n]}")
+done
+if [ "${#RUNS[@]}" -eq 0 ]; then
+  echo "=== task $K is past the end of the ${#ALL[@]}-run list (cells $PHASE1_CELLS); nothing to do ==="
+  exit 0
+fi
+
+echo "=== packed task $K -> ${RUNS[*]} (cell:seed) on one GPU: $(date) on $(hostname) ==="
 nvidia-smi
 
 # Each run is its own PROCESS, not sourced: the body cd's, takes a per-run lock and
 # installs an EXIT trap, so two of them in one shell would collide.
 pids=()
-for i in "${RUNS[@]}"; do
-  CELL=$(( i % 5 ))
-  SEED=$(( 1000 + (i / 5) * 1000 ))
-  LOG="phase1_run${i}_cell${CELL}_s${SEED}.log"
-  echo "=== launching run $i (cell $CELL, seed $SEED) -> $LOG ==="
+for r in "${RUNS[@]}"; do
+  CELL="${r%%:*}"
+  SEED="${r##*:}"
+  LOG="phase1_cell${CELL}_s${SEED}.log"
+  echo "=== launching cell $CELL, seed $SEED -> $LOG ==="
   PHASE1_CELL="$CELL" SEED="$SEED" NUM_WORKERS="$NUM_WORKERS" bash "$BODY" > "$LOG" 2>&1 &
   pids+=("$!")
   sleep 30      # stagger: two simultaneous /tmp staging copies would fight over NFS

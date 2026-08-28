@@ -59,8 +59,16 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 `main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 5종 prefetch →
 학습 잡 제출. 체이닝은 없다. 다섯 셀이 각각 2~16h 라 한 잡에 하나씩 들어간다.
 
-**한 번 던지면 15런(5셀 × 3시드)이 전부 큐에 들어간다.** array 인덱스가 셀과 시드를
-같이 인코딩한다 — `cell = idx % 5`, `seed = 1000 + idx/5`.
+**한 번 던지면 15런(5셀 × 3시드)이 전부 큐에 들어가고, 기본이 GPU 한 장에 2학습이다.**
+
+일부 셀만 돌리려면 `PHASE1_CELLS` 로 고른다 (세 시드는 항상 전부):
+
+```
+sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
+   → push_button A1 · pick_place A1 · push_button A2 × 시드 1000/2000/3000 = 9런
+```
+
+`PACKED=0` 이면 GPU 한 장에 하나씩.
 
 | cell | task | 조건 | frames | steps | 실측 소요 |
 |---|---|---|---|---|---|

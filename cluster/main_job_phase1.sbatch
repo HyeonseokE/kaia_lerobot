@@ -49,8 +49,14 @@
 # model repo name (smolvla_phase1_<task>_<cond>_<seed>_10fps, the same slot
 # ablation_study uses), so the 15 runs never collide with each other.
 #
-# To run a subset instead, submit cluster/train_phase1.sbatch directly with an explicit
-# --array (its header has the index table).
+# PHASE1_CELLS restricts which cells run, at all three seeds. Cells are
+# 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1 | 3 push_button A2 |
+# 4 pick_place A2:
+#
+#   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
+#     -> push_button A1, pick_place A1, push_button A2 at seeds 1000/2000/3000 = 9 runs
+#
+# PACKED=0 puts one run per GPU instead of two.
 #
 # NOTE: the seed-LESS repos on the Hub (smolvla_phase1_*_A1_10fps, pushed 2026-08-23/24)
 # predate that convention. Runs from here land beside them under the new name rather
@@ -103,7 +109,15 @@ else
 fi
 echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --abbrev-ref HEAD) @ $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --short HEAD) ==="
 
-TRAIN_JOB="$CHECKOUT/cluster/train_phase1.sbatch"
+# Packed by DEFAULT: two runs per GPU, so at the launcher's %2 that is 2 GPUs x 2
+# trainings in parallel. PACKED=0 falls back to one run per GPU.
+if [ "${PACKED:-1}" = "1" ]; then
+  TRAIN_JOB="$CHECKOUT/cluster/train_phase1_packed.sbatch"
+  echo "=== PACKED: two runs per GPU, four trainings in parallel ==="
+else
+  TRAIN_JOB="$CHECKOUT/cluster/train_phase1.sbatch"
+  echo "=== PACKED=0: one run per GPU ==="
+fi
 for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_phase1_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
@@ -200,7 +214,7 @@ if [ "$RUNNING" -gt 0 ]; then
   exit 1
 fi
 
-sbatch --job-name="$JOBNAME" "$TRAIN_JOB"
+sbatch --job-name="$JOBNAME" --export=ALL,PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4}" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
