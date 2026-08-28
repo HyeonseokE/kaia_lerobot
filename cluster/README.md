@@ -68,7 +68,11 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
    → push_button A1 · pick_place A1 · push_button A2 × 시드 1000/2000/3000 = 9런
 ```
 
-`PACKED=0` 이면 GPU 한 장에 하나씩.
+기본은 **GPU 한 장에 3학습, 한 번에 한 잡**(`--array=...%1`). 위 9런이면 **3 → 3 → 3**
+세 웨이브다. VRAM 은 14.4GB × 3 = 43GB (96GB 중).
+
+`PACK` 으로 한 GPU 당 개수를, `PACKED=0` 으로 패킹 자체를 끌 수 있다. GPU 가 여러 장
+쓸 수 있게 되면 `train_phase1_packed.sbatch` 의 `%1` 을 `%2` 등으로 올린다.
 
 | cell | task | 조건 | frames | steps | 실측 소요 |
 |---|---|---|---|---|---|

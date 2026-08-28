@@ -1,10 +1,13 @@
 #!/bin/bash
-# SmolVLA Phase-1 -- TWO runs per GPU.
+# SmolVLA Phase-1 -- several runs per GPU (PACK, default 3).
 #
-# SLURM allocates a GPU exclusively to a job, so two separate jobs can never share one.
-# The only way to put two trainings on one GPU is to launch both inside a single job --
-# which is what this does. SmolVLA at batch 64 holds ~14.4 GB, so two fit in a 96 GB
-# pro6000 with room to spare.
+# SLURM allocates a GPU exclusively to a job, so separate jobs can never share one. The
+# only way to put several trainings on one GPU is to launch them inside a single job --
+# which is what this does. SmolVLA at batch 64 holds ~14.4 GB, so three fit in a 96 GB
+# pro6000 with room to spare (43 GB).
+#
+# --array=...%1 runs ONE task at a time, i.e. one GPU. With PHASE1_CELLS=0,1,3 and the
+# default PACK=3 that is 9 runs as 3 waves of 3.
 #
 #   sbatch cluster/train_phase1_packed.sbatch                 # the whole 15-run grid
 #   sbatch --array=0-3 cluster/train_phase1_packed.sbatch     # first 8 runs only
@@ -12,31 +15,31 @@
 Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
 #        3 push_button A2 | 4 pick_place A2
 #
-# The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes two of
-# it, so --array=0-7 covers all 15. PHASE1_CELLS picks a subset -- the list shortens and
-# the high tasks become no-ops, no --array change needed:
+# The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes PACK of
+# it. PHASE1_CELLS picks a subset -- the list shortens and the high tasks become no-ops,
+# so the static --array line needs no editing:
 #
 #   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/train_phase1_packed.sbatch
 #     -> push_button A1, pick_place A1, push_button A2 at all three seeds = 9 runs
 #
 # WHETHER THIS IS FASTER IS NOT SETTLED. On an A6000 it was not: SCRAPE measured two
 # SmolVLA runs sharing a GPU at 2.9 and 3.8 s/step against 1.5 s/step alone, i.e. no
-# throughput gained. A pro6000 is a much bigger GPU and may not saturate on one run --
-# the seed-1000 push_button run measured updt_s 0.318 with data_s 0.013, so the loader
-# is not the limit, but that says nothing about how much SM headroom is left. Compare
-# updt_s here against 0.318: below ~0.64 and packing wins, above it and it loses.
+# throughput gained. A pro6000 is a much bigger GPU and may have SM headroom an A6000
+# did not -- the unpacked runs measured updt_s 0.318 with data_s 0.013, so the loader is
+# not the limit, but that says nothing about how much compute is left over. Compare
+# updt_s here against 0.318: with PACK=3, below ~0.95 packing wins, above it it loses.
 #
-# RISK: the two runs share one job. If either dies -- OOM, CUDA error -- the job exits
-# and takes the other with it, and with save_freq == steps there are no intermediate
-# checkpoints to resume from.
+# RISK: the packed runs share one job. If any of them dies -- OOM, CUDA error -- the job
+# exits and takes the others with it, and with save_freq == steps there are no
+# intermediate checkpoints to resume from.
 #
 #SBATCH --job-name=smolvla-phase1-packed
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=18          # 8 workers x 2 runs, plus room for the main threads
+#SBATCH --cpus-per-task=27          # 8 workers x 3 packed runs, plus the main threads
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00
-#SBATCH --array=0-7%2               # %2 = two GPUs, i.e. four trainings at once
+#SBATCH --array=0-7%1               # %1 = ONE GPU at a time; PACK runs share it
 #SBATCH --output=slurm-phase1-packed-%A_%a.out
 
 set -euo pipefail
@@ -68,8 +71,8 @@ export NUM_WORKERS="${NUM_WORKERS:-8}"
 # tasks with nothing to do, and they exit 0 rather than failing. That is what lets one
 # static --array=0-7 line serve any subset:
 #
-#   PHASE1_CELLS=0,1,3  ->  9 runs  ->  tasks 0-4 work, tasks 5-7 are no-ops
-#   PHASE1_CELLS=2      ->  3 runs  ->  tasks 0-1 work, the rest are no-ops
+#   PHASE1_CELLS=0,1,3 with PACK=3  ->  9 runs  ->  tasks 0-2 work, 3-7 are no-ops
+#   PHASE1_CELLS=2     with PACK=3  ->  3 runs  ->  task 0 works, the rest are no-ops
 PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4}"
 
 ALL=()
@@ -80,8 +83,13 @@ for sd in 1000 2000 3000; do
   done
 done
 
+# How many runs share this job's single GPU. 3 x ~14.4 GB is 43 GB of a 96 GB pro6000,
+# and 3 x 8 dataloader workers is why cpus-per-task is 27.
+PACK="${PACK:-3}"
+
 RUNS=()
-for n in $(( K * 2 )) $(( K * 2 + 1 )); do
+for j in $(seq 0 $(( PACK - 1 ))); do
+  n=$(( K * PACK + j ))
   [ "$n" -lt "${#ALL[@]}" ] && RUNS+=("${ALL[$n]}")
 done
 if [ "${#RUNS[@]}" -eq 0 ]; then
