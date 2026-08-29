@@ -9,10 +9,10 @@
 # --array=...%2 runs TWO tasks at a time, i.e. two GPUs. All six cells at PACK=3 is
 # 18 runs as 6 tasks, which clear in three waves of two jobs = six trainings at once.
 #
-#   sbatch cluster/train_phase1_packed.sbatch                 # the whole 15-run grid
-#   sbatch --array=0-3 cluster/train_phase1_packed.sbatch     # first 8 runs only
+#   sbatch cluster/train_phase1_packed.sbatch                 # the whole 18-run grid
+#   sbatch --array=0-2 cluster/train_phase1_packed.sbatch     # seed 1000 + 2000 only
 #
-Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
+# Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
 #        3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2
 #
 # The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes PACK of

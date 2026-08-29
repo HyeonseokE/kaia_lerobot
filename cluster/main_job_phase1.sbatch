@@ -8,7 +8,7 @@
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
 #   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue all 15 training runs and exit
+#   4. submit     -- queue all 18 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -205,7 +205,7 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit all 15 training runs (5 cells x seeds 1000/2000/3000) ==="
+echo "=== [4/4] submit all 18 training runs (6 cells x seeds 1000/2000/3000) ==="
 JOBNAME="smolvla-phase1"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
