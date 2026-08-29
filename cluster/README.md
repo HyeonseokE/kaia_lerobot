@@ -59,72 +59,36 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 `main_job.sbatch` 와 같은 구조다 — 토큰 확인 → clone/pull → 데이터셋 5종 prefetch →
 학습 잡 제출. 체이닝은 없다. 다섯 셀이 각각 2~16h 라 한 잡에 하나씩 들어간다.
 
-**한 번 던지면 15런(5셀 × 3시드)이 전부 큐에 들어가고, 기본이 GPU 한 장에 2학습이다.**
+**한 번 던지면 18런(6셀 × 3시드)이 전부 큐에 들어간다.** 기본은 GPU 한 장에 3학습,
+동시 2잡 — 즉 **GPU 2장 × 3학습 = 동시 6개**, 세 웨이브로 끝난다.
 
-일부 셀만 돌리려면 `PHASE1_CELLS` 로 고른다 (세 시드는 항상 전부):
+| cell | task | 조건 | frames | steps | 소요 |
+|---|---|---|---|---|---|
+| 0 | push_button | A1 | 11,320 | 8,800 | ~0.8h |
+| 1 | pick_place | A1 | 28,459 | 22,200 | ~2.0h |
+| 2 | sort_by_color | A1 | 74,322 | 58,050 | ~5.1h |
+| 3 | push_button | A2 | 11,380 | 8,850 | ~0.8h |
+| 4 | pick_place | A2 | 31,526 | 24,600 | ~2.2h |
+| 5 | sort_by_color | A2 | 74,921 | 58,500 | ~5.2h |
+
+```
+wave 1   task0 (cell 0,1,2 · s1000)   task1 (cell 3,4,5 · s1000)
+wave 2   task2 (cell 0,1,2 · s2000)   task3 (cell 3,4,5 · s2000)
+wave 3   task4 (cell 0,1,2 · s3000)   task5 (cell 3,4,5 · s3000)
+```
+
+총 ~48 GPU-hours. 일부 셀만 돌리려면 `PHASE1_CELLS`, 한 GPU 당 개수는 `PACK`,
+패킹 자체를 끄려면 `PACKED=0`:
 
 ```
 sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
-   → push_button A1 · pick_place A1 · push_button A2 × 시드 1000/2000/3000 = 9런
 ```
 
-기본은 **GPU 한 장에 3학습, 한 번에 한 잡**(`--array=...%1`). 위 9런이면 **3 → 3 → 3**
-세 웨이브다. VRAM 은 14.4GB × 3 = 43GB (96GB 중).
-
-`PACK` 으로 한 GPU 당 개수를, `PACKED=0` 으로 패킹 자체를 끌 수 있다. GPU 가 여러 장
-쓸 수 있게 되면 `train_phase1_packed.sbatch` 의 `%1` 을 `%2` 등으로 올린다.
-
-| cell | task | 조건 | frames | steps | 실측 소요 |
-|---|---|---|---|---|---|
-| 0 | push_button | A1 | 11,299 | 8,800 | ~47분 |
-| 1 | pick_place | A1 | 31,744 | 24,800 | ~2.2h |
-| 2 | sort_by_color | A1 | 74,255 | 58,000 | ~5.1h |
-| 3 | push_button | A2 | 11,359 | 8,850 | ~47분 |
-| 4 | pick_place | A2 | 30,370 | 23,700 | ~2.1h |
-
-```
-idx  0-4   seed 1000        전체 ~33 GPU-hours
-idx  5-9   seed 2000        GPU 3~4장이면 ~11h
-idx 10-14  seed 3000
-```
-
-소요 시간은 실측이다 — pro6000 에서 `updt_s:0.318` (batch 64, 카메라 2개, 2026-08-27).
-`--time` 은 1일이면 충분하다.
-
-부분 실행은 array 를 직접 지정한다:
-
-```
-sbatch --array=5-9 cluster/train_phase1.sbatch       # seed 2000 전부
-sbatch --array=2,7,12 cluster/train_phase1.sbatch    # sort_by_color A1, 세 시드
-```
-
-**sort_by_color A2 는 아직 수집 전이다.** 위 5셀이 현재 전부다. 수집되면
-`train_phase1_body.sh` 의 case 에 행 추가 + 인덱스 산술의 `5` 를 `6` 으로, array 를
-`0-17` 로 바꾸면 된다.
-
-**동시 실행 수는 `%N` 으로 정한다.** 잡 하나가 GPU 한 장이므로 `%2` = GPU 2장이다.
-현재 `--array=0-14%2`. 파티션 전체를 쓰려면 `%4`.
-
-노드를 지정하려면 제출할 때 `--nodelist` / `--exclude` 를 붙인다:
-
-```
-sbatch --nodelist=p1 cluster/train_phase1.sbatch
-```
-
-**특정 GPU 인덱스는 지정할 수 없다.** SLURM 이 노드에서 GPU 를 골라 할당하고
-`CUDA_VISIBLE_DEVICES` 를 대신 설정한다. 노드가 가장 세밀한 단위다.
-
-`--cpus-per-task=12` 이다 (towel 잡은 16). phase1 은 `num_workers=8` / 카메라 2개라 16은
-슬랙이었고, 실제로 슬롯을 하나 까먹었다 — 2026-08-27 pro6000 한 장과 CPU 정확히 16개가
-비어 있는데도 task 3 이 `Reason: Resources` 로 못 들어갔다. **`num_workers` 를 올리면
-이 값도 같이 올려야 한다.**
-
-**학습 인자는 SCRAPE phase1 컨벤션을 따른다** — batch **64**(32 아님), 50 epoch,
-torchcodec, 최종 체크포인트만. Phase-1 은 같은 태스크의 A0/A1/A2 를 비교하는 실험이고,
-모든 셀을 동일하게 학습해야 비교가 성립한다. `train_cap300_body.sh` 의 숫자와 "통일"하지
-말 것 — step 공식도 다르다 (phase1 은 `floor(frames/64) × 50`, cap300 은 총합 올림).
-
-모델 레포는 `smolvla_phase1_<task>_<조건>_<seed>_10fps`.
+> ⚠️ **프레임 수는 움직인다.** 여섯 데이터셋 전부 2026-08-27~29 사이 재수집됐고 넷이
+> 크기가 바뀌었다 (pick_place A1 31,744 → 28,459 / pick_place A2 30,370 → 31,526).
+> 아무 공지도 없었다. 본체가 스테이징된 사본에서 예산을 재계산해 표와 어긋나면 학습 전에
+> 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
+> 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
 ### C. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
 

@@ -45,20 +45,25 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 #
 # Frame counts read from the Hub on 2026-08-26. The guard below recomputes the budget
 # from the staged dataset and refuses to train on a mismatch.
-# One entry per Phase-1 CELL = task x condition. Five exist; sort_by_color A2 does NOT
-# have a dataset on the Hub (checked 2026-08-26 with an authenticated listing -- the
-# account has exactly these five phase1_* repos), even though
-# configs/ablation_study/phase1/train_smolvla_phase1_sort_by_color_A2_10fps.sh on the
-# SCRAPE box references it at 80,385 frames. Add a row here once it is published.
-PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-4). Source this from cluster/train_phase1.sbatch.}"
+# One entry per Phase-1 CELL = task x condition. All six exist on the Hub as of
+# 2026-08-29.
+#
+# FRAME COUNTS MOVE. Every one of these datasets was re-collected between 2026-08-27 and
+# 2026-08-29, and four of the six changed size -- pick_place A1 went 31,744 -> 28,459,
+# pick_place A2 went 30,370 -> 31,526. Nothing announced it. The guard below recomputes
+# the budget from the staged copy and refuses to train when it disagrees with this table,
+# because a cell trained at the wrong epoch count is not comparable to its siblings and
+# nothing in the logs would say so.
+PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-5). Source this from cluster/train_phase1.sbatch.}"
 
 case "$PHASE1_CELL" in
-  0) TASK=push_button;    COND=A1; FRAMES=11299; STEPS=8800  ;;
-  1) TASK=pick_place;     COND=A1; FRAMES=31744; STEPS=24800 ;;
-  2) TASK=sort_by_color;  COND=A1; FRAMES=74255; STEPS=58000 ;;
-  3) TASK=push_button;    COND=A2; FRAMES=11359; STEPS=8850  ;;
-  4) TASK=pick_place;     COND=A2; FRAMES=30370; STEPS=23700 ;;
-  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-4)"; exit 1 ;;
+  0) TASK=push_button;    COND=A1; FRAMES=11320; STEPS=8800  ;;
+  1) TASK=pick_place;     COND=A1; FRAMES=28459; STEPS=22200 ;;
+  2) TASK=sort_by_color;  COND=A1; FRAMES=74322; STEPS=58050 ;;
+  3) TASK=push_button;    COND=A2; FRAMES=11380; STEPS=8850  ;;
+  4) TASK=pick_place;     COND=A2; FRAMES=31526; STEPS=24600 ;;
+  5) TASK=sort_by_color;  COND=A2; FRAMES=74921; STEPS=58500 ;;
+  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-5)"; exit 1 ;;
 esac
 
 HUB_USER=HyeonseokE

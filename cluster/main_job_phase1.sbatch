@@ -50,8 +50,8 @@
 # ablation_study uses), so the 15 runs never collide with each other.
 #
 # PHASE1_CELLS restricts which cells run, at all three seeds. Cells are
-# 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1 | 3 push_button A2 |
-# 4 pick_place A2:
+# 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1 |
+# 3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2:
 #
 #   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 #     -> push_button A1, pick_place A1, push_button A2 at seeds 1000/2000/3000 = 9 runs
@@ -154,6 +154,7 @@ REPOS = [
     "HyeonseokE/phase1_sort_by_color_A1_10fps",
     "HyeonseokE/phase1_push_button_A2_10fps",
     "HyeonseokE/phase1_pick_place_A2_10fps",
+    "HyeonseokE/phase1_sort_by_color_A2_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -216,7 +217,7 @@ if [ "$RUNNING" -gt 0 ]; then
   exit 1
 fi
 
-sbatch --job-name="$JOBNAME" --export=ALL,PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4}",PACK="${PACK:-3}" "$TRAIN_JOB"
+sbatch --job-name="$JOBNAME" --export=ALL,PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4,5}",PACK="${PACK:-3}" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'

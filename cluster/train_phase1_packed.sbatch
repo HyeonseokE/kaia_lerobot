@@ -6,14 +6,14 @@
 # which is what this does. SmolVLA at batch 64 holds ~14.4 GB, so three fit in a 96 GB
 # pro6000 with room to spare (43 GB).
 #
-# --array=...%1 runs ONE task at a time, i.e. one GPU. With PHASE1_CELLS=0,1,3 and the
-# default PACK=3 that is 9 runs as 3 waves of 3.
+# --array=...%2 runs TWO tasks at a time, i.e. two GPUs. All six cells at PACK=3 is
+# 18 runs as 6 tasks, which clear in three waves of two jobs = six trainings at once.
 #
 #   sbatch cluster/train_phase1_packed.sbatch                 # the whole 15-run grid
 #   sbatch --array=0-3 cluster/train_phase1_packed.sbatch     # first 8 runs only
 #
 Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
-#        3 push_button A2 | 4 pick_place A2
+#        3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2
 #
 # The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes PACK of
 # it. PHASE1_CELLS picks a subset -- the list shortens and the high tasks become no-ops,
@@ -39,7 +39,7 @@ Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
 #SBATCH --cpus-per-task=27          # 8 workers x 3 packed runs, plus the main threads
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00
-#SBATCH --array=0-7%1               # %1 = ONE GPU at a time; PACK runs share it
+#SBATCH --array=0-7%2               # %2 = two GPUs at a time; PACK runs share each
 #SBATCH --output=slurm-phase1-packed-%A_%a.out
 
 set -euo pipefail
@@ -71,14 +71,14 @@ export NUM_WORKERS="${NUM_WORKERS:-8}"
 # tasks with nothing to do, and they exit 0 rather than failing. That is what lets one
 # static --array=0-7 line serve any subset:
 #
-#   PHASE1_CELLS=0,1,3 with PACK=3  ->  9 runs  ->  tasks 0-2 work, 3-7 are no-ops
-#   PHASE1_CELLS=2     with PACK=3  ->  3 runs  ->  task 0 works, the rest are no-ops
-PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4}"
+#   all six cells      with PACK=3  -> 18 runs  ->  tasks 0-5 work, 6-7 are no-ops
+#   PHASE1_CELLS=0,1,3 with PACK=3  ->  9 runs  ->  tasks 0-2 work, the rest are no-ops
+PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4,5}"
 
 ALL=()
 for sd in 1000 2000 3000; do
   for c in ${PHASE1_CELLS//,/ }; do
-    [ "$c" -ge 0 ] && [ "$c" -le 4 ] || { echo "FATAL: PHASE1_CELLS has '$c' (valid 0-4)."; exit 1; }
+    [ "$c" -ge 0 ] && [ "$c" -le 5 ] || { echo "FATAL: PHASE1_CELLS has '$c' (valid 0-5)."; exit 1; }
     ALL+=("${c}:${sd}")
   done
 done
