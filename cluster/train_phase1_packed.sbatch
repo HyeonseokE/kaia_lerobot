@@ -19,7 +19,8 @@
 # it. PHASE1_CELLS picks a subset -- the list shortens and the high tasks become no-ops,
 # so the static --array line needs no editing:
 #
-#   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/train_phase1_packed.sbatch
+#   PHASE1_CELLS=0,1,3 sbatch --export=ALL cluster/train_phase1_packed.sbatch
+#   (NOT --export=ALL,PHASE1_CELLS=0,1,3 -- sbatch splits --export on commas)
 #     -> push_button A1, pick_place A1, push_button A2 at all three seeds = 9 runs
 #
 # WHETHER THIS IS FASTER IS NOT SETTLED. On an A6000 it was not: SCRAPE measured two

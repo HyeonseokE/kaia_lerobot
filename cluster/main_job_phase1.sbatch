@@ -53,7 +53,8 @@
 # 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1 |
 # 3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2:
 #
-#   sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
+#   PHASE1_CELLS=0,1,3 sbatch --export=ALL cluster/main_job_phase1.sbatch
+#   (NOT --export=ALL,PHASE1_CELLS=0,1,3 -- sbatch splits --export on commas)
 #     -> push_button A1, pick_place A1, push_button A2 at seeds 1000/2000/3000 = 9 runs
 #
 # PACK is how many runs share one GPU (default 3), and the launcher runs one job at a
@@ -212,12 +213,20 @@ if [ "$RUNNING" -gt 0 ]; then
   echo "FATAL: $RUNNING phase1 training job(s) are already queued or running."
   echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
   echo "       or submit just the missing runs with an explicit --array:"
-  echo "         sbatch --array=5-14 cluster/train_phase1.sbatch"
+  echo "         sbatch --array=<subset> cluster/train_phase1.sbatch"
   squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E "JOBID|${JOBNAME}"
   exit 1
 fi
 
-sbatch --job-name="$JOBNAME" --export=ALL,PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4,5}",PACK="${PACK:-3}" "$TRAIN_JOB"
+# NOT --export=ALL,PHASE1_CELLS=0,1,2,3,4,5 -- sbatch splits --export on commas, and
+# SLURM offers no escape for a comma inside a value. On 2026-08-29 that turned
+# PHASE1_CELLS=0,1,2,3,4,5 into PHASE1_CELLS=0 plus five junk assignments, so the array
+# trained cell 0 at three seeds and reported "past the end of the 3-run list" for
+# everything else. Export into this shell's environment and let --export=ALL carry it.
+export PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4,5}"
+export PACK="${PACK:-3}"
+echo "=== cells=$PHASE1_CELLS  pack=$PACK ==="
+sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
