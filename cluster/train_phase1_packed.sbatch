@@ -37,7 +37,12 @@
 #SBATCH --job-name=smolvla-phase1-packed
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=27          # 8 workers x 3 packed runs, plus the main threads
+#SBATCH --cpus-per-task=12          # 3 workers x 3 packed runs, plus the main threads
+                                    # Was 27 (8 workers each) and it would not schedule:
+                                    # 2026-08-29 the partition had 2 free GPUs but only
+                                    # 12 free CPUs, so the job waited on CPUs it did not
+                                    # need. The GPU is the bottleneck here, not the
+                                    # loader -- see NUM_WORKERS below.
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00
 #SBATCH --array=0-7%2               # %2 = two GPUs at a time; PACK runs share each
@@ -64,7 +69,11 @@ K="$SLURM_ARRAY_TASK_ID"
 # 8 workers per run, same as the unpacked launcher -- two runs means 16 workers on this
 # job, which is why cpus-per-task is 18. Lower it if the partition is tight on CPUs:
 # data_s is 0.013 s against updt_s 0.318, so the loader has an enormous margin.
-export NUM_WORKERS="${NUM_WORKERS:-8}"
+# 3 workers per run, not the 8 an unpacked run gets. Three packed runs at 8 would ask
+# for 27 CPUs and sit unschedulable behind other jobs. It costs almost nothing: the
+# measured packed run had data_s 0.032 against updt_s 0.429, so the loader is idle ~93%
+# of each step and has room to lose most of its parallelism before the GPU ever waits.
+export NUM_WORKERS="${NUM_WORKERS:-3}"
 
 # PHASE1_CELLS restricts which cells take part. Default is all five. The run list is
 # built cell-major within each seed, in the order given, and this task takes the two
@@ -84,8 +93,7 @@ for sd in 1000 2000 3000; do
   done
 done
 
-# How many runs share this job's single GPU. 3 x ~14.4 GB is 43 GB of a 96 GB pro6000,
-# and 3 x 8 dataloader workers is why cpus-per-task is 27.
+# How many runs share this job's single GPU. 3 x ~14.4 GB is 43 GB of a 96 GB pro6000.
 PACK="${PACK:-3}"
 
 RUNS=()
