@@ -127,11 +127,11 @@ DS_SRC="$HOME/datasets/$DS"
 #
 # grep/awk, not python3: this runs on the bare compute node, and the only Python on this
 # cluster lives inside the container image.
-HAVE_FRAMES="$(grep -o '"total_frames"[[:space:]]*:[[:space:]]*[0-9]*' "$DS_SRC/meta/info.json" | grep -o '[0-9]*$')"
-[ -n "$HAVE_FRAMES" ] || { echo "FATAL: could not read total_frames from $DS_SRC/meta/info.json"; exit 1; }
-WANT_STEPS="$(awk -v f="$HAVE_FRAMES" 'BEGIN{ printf "%d", int(f/64) * 50 }')"
+SRC_FRAMES="$(grep -o '"total_frames"[[:space:]]*:[[:space:]]*[0-9]*' "$DS_SRC/meta/info.json" | grep -o '[0-9]*$')"
+[ -n "$SRC_FRAMES" ] || { echo "FATAL: could not read total_frames from $DS_SRC/meta/info.json"; exit 1; }
+WANT_STEPS="$(awk -v f="$SRC_FRAMES" 'BEGIN{ printf "%d", int(f/64) * 50 }')"
 if [ "$WANT_STEPS" != "$STEPS" ]; then
-  echo "FATAL: $DS has $HAVE_FRAMES frames (table says $FRAMES) -> 50 epochs is $WANT_STEPS steps, not $STEPS."
+  echo "FATAL: $DS has $SRC_FRAMES frames (table says $FRAMES) -> 50 epochs is $WANT_STEPS steps, not $STEPS."
   echo "       The dataset was re-uploaded. Update the case block in cluster/train_phase1_body.sh,"
   echo "       and check whether the other Phase-1 cells of this task need re-running to match."
   exit 1
@@ -150,9 +150,22 @@ STAGE_OK="$DS_ROOT/.staged_ok"
 # left a truncated mp4 behind. The next job saw meta/info.json, declared "already
 # staged", and died with an IndexError past the end of the video. meta/info.json is NOT
 # proof of a complete copy; only the .staged_ok marker, written last, is.
-if [ -f "$STAGE_OK" ]; then
-  echo "=== dataset already staged at $DS_ROOT ==="
+# A .staged_ok marker is NOT enough to reuse the copy: it says the copy finished, not
+# that it is still the dataset the Hub serves. On 2026-08-29 all six phase1 datasets were
+# re-collected, prefetch refreshed $HOME/datasets, and this block happily reused a /tmp
+# copy from 2026-08-27 -- so training read 11,299 frames while every check upstream saw
+# 11,320. Compare the two copies and restage on any difference.
+STAGED_FRAMES=""
+if [ -f "$STAGE_OK" ] && [ -f "$DS_ROOT/meta/info.json" ]; then
+  STAGED_FRAMES="$(grep -o '"total_frames"[[:space:]]*:[[:space:]]*[0-9]*' "$DS_ROOT/meta/info.json" | grep -o '[0-9]*$')"
+fi
+
+if [ -f "$STAGE_OK" ] && [ "$STAGED_FRAMES" = "$SRC_FRAMES" ]; then
+  echo "=== dataset already staged at $DS_ROOT ($STAGED_FRAMES frames) ==="
 else
+  if [ -n "$STAGED_FRAMES" ]; then
+    echo "=== staged copy is stale ($STAGED_FRAMES frames, source has $SRC_FRAMES) -- restaging ==="
+  fi
   TMP="$DS_ROOT.partial.${SLURM_JOB_ID:-$$}"
   echo "=== staging $DS_SRC -> $DS_ROOT ($(du -sh "$DS_SRC" | cut -f1)) ==="
   rm -rf "$TMP" "$DS_ROOT"
@@ -212,7 +225,7 @@ echo "${SLURM_JOB_ID:-unknown}" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 echo "=== Job start: $(date) on $(hostname) ==="
-echo "=== Phase-1 $COND / $TASK: $NAME  dataset=$DATASET  frames=$HAVE_FRAMES  steps=$STEPS (50 epochs, batch 64, seed $SEED) ==="
+echo "=== Phase-1 $COND / $TASK: $NAME  dataset=$DATASET  frames=$SRC_FRAMES  steps=$STEPS (50 epochs, batch 64, seed $SEED) ==="
 nvidia-smi
 
 # ------------------------------------------------------------------- preflight
@@ -237,8 +250,30 @@ print('matmul ok', (x @ x).sum().item())
 # SAVE_FREQ is lowered later.
 LAST_CKPT="$RUN_DIR/out/checkpoints/last/pretrained_model/train_config.json"
 
+# Refuse to resume a checkpoint that was produced from a DIFFERENT version of the
+# dataset. On 2026-08-29 push_button A1 resumed a checkpoint left by the 2026-08-27 run
+# on the 11,299-frame dataset, found it already at step 8800, printed "End of training"
+# without training anything, and pushed those stale weights to the Hub as if they were
+# the new dataset's model. Nothing in the log flagged it.
+#
+# $RUN_DIR/.dataset_frames records what the run dir was built from. No stamp means the
+# dir predates this check, which is exactly the case that went wrong -- treat it as
+# suspect rather than trusting it.
+STAMP="$RUN_DIR/.dataset_frames"
 if [ -f "$LAST_CKPT" ]; then
-  echo "=== resuming from $LAST_CKPT ==="
+  PREV_FRAMES="$(cat "$STAMP" 2>/dev/null || echo "")"
+  if [ "$PREV_FRAMES" != "$SRC_FRAMES" ]; then
+    echo "FATAL: $RUN_DIR holds a checkpoint from a different dataset version"
+    echo "       (run dir: ${PREV_FRAMES:-<unstamped, predates this check>} frames; current: $SRC_FRAMES)."
+    echo "       Resuming it would train on -- or worse, publish -- the old data."
+    echo "       Delete the run dir and start fresh:   rm -rf $RUN_DIR"
+    exit 1
+  fi
+fi
+echo "$SRC_FRAMES" > "$STAMP"
+
+if [ -f "$LAST_CKPT" ]; then
+  echo "=== resuming from $LAST_CKPT (same dataset, $SRC_FRAMES frames) ==="
   POLICY_ARGS=(--config_path="$LAST_CKPT" --resume=true)
 else
   # A previous run that died before its first checkpoint leaves an out/ dir behind, and
