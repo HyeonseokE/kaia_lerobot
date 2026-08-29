@@ -32,7 +32,9 @@
 #SBATCH --job-name=smolvla-bench-cap-packed
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=18          # 8 workers x 2 runs, plus room for the main threads
+#SBATCH --cpus-per-task=10          # 4 workers x 2 runs, plus the main threads
+                                    # Kept small on purpose: free CPUs, not free GPUs,
+                                    # are what this partition runs out of first.
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00
 #SBATCH --array=0-5%2               # %2 = two GPUs, i.e. four trainings at once
@@ -57,7 +59,10 @@ BODY="$CHECKOUT/cluster/train_bench_cap_body.sh"
 K="$SLURM_ARRAY_TASK_ID"
 [ "$K" -ge 0 ] && [ "$K" -le 5 ] || { echo "FATAL: array index $K out of range (0-5)."; exit 1; }
 
-export NUM_WORKERS="${NUM_WORKERS:-8}"
+# 4 workers per run rather than the 8 an unpacked run gets. data_s is 0.013 s against
+# updt_s 0.318, so the loader has an enormous margin, and CPUs left free are what let the
+# job schedule at all.
+export NUM_WORKERS="${NUM_WORKERS:-4}"
 
 RUNS=()
 for i in $(( K * 2 )) $(( K * 2 + 1 )); do
