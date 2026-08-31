@@ -73,10 +73,11 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 | 6 | pick_place `_via4cm` | A1 | 28,530 | 22,250 | ~2.0h |
 | 7 | pick_place `_via4cm` | A2 | 28,755 | 22,450 | ~2.0h |
 
-셀 6·7 은 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5). 옵트인:
+셀 6·7 은 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5).
+전용 진입점이 따로 있다 — 붙여넣고 던지면 끝, 수정할 게 없다:
 
 ```
-PHASE1_CELLS=6,7 sbatch --export=ALL cluster/main_job_phase1.sbatch
+cluster/main_job_via4cm.sbatch     ← 셀 6,7 × 3시드 = 6런
 ```
 
 셀 1·4 를 대체하는 게 아니라 **비교 대상**이므로 별도 셀로 둔다. 모델 이름은
