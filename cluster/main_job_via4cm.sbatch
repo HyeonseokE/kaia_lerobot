@@ -122,8 +122,8 @@ from huggingface_hub import hf_hub_download, snapshot_download
 
 ROOT = Path(os.environ["DATASETS_DIR"])
 
-# SCRAPE-IsaacLab ablation_study Phase-1, conditions A1 and A2. All five: 100 episodes,
-# 20 layout seeds x 5, 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
+# SCRAPE-IsaacLab ablation_study Phase-1, the _via4cm pick_place collections. Both:
+# 100 episodes, 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
 REPOS = [
     "HyeonseokE/phase1_pick_place_A1_10fps_via4cm",
     "HyeonseokE/phase1_pick_place_A2_10fps_via4cm",
