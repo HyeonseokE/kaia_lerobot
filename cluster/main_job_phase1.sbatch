@@ -51,7 +51,12 @@
 #
 # PHASE1_CELLS restricts which cells run, at all three seeds. Cells are
 # 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1 |
-# 3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2:
+# 3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2 |
+# 6 pick_place A1 _via4cm             | 7 pick_place A2 _via4cm
+#
+# The default is cells 0-5. The _via4cm cells are opt-in:
+#
+#   PHASE1_CELLS=6,7 sbatch --export=ALL cluster/main_job_phase1.sbatch
 #
 #   PHASE1_CELLS=0,1,3 sbatch --export=ALL cluster/main_job_phase1.sbatch
 #   (NOT --export=ALL,PHASE1_CELLS=0,1,3 -- sbatch splits --export on commas)
@@ -156,6 +161,8 @@ REPOS = [
     "HyeonseokE/phase1_push_button_A2_10fps",
     "HyeonseokE/phase1_pick_place_A2_10fps",
     "HyeonseokE/phase1_sort_by_color_A2_10fps",
+    "HyeonseokE/phase1_pick_place_A1_10fps_via4cm",
+    "HyeonseokE/phase1_pick_place_A2_10fps_via4cm",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
