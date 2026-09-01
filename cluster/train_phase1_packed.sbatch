@@ -15,6 +15,7 @@
 # Cells: 0 push_button A1 | 1 pick_place A1 | 2 sort_by_color A1
 #        3 push_button A2 | 4 pick_place A2  | 5 sort_by_color A2
 #        6 pick_place A1 _via4cm             | 7 pick_place A2 _via4cm
+#        8 sort_by_color A1 _via4cm          | 9 sort_by_color A2 _via4cm
 #
 # The run list is (cells) x (seeds 1000, 2000, 3000) and each array task takes PACK of
 # it. PHASE1_CELLS picks a subset -- the list shortens and the high tasks become no-ops,
@@ -89,7 +90,7 @@ PHASE1_CELLS="${PHASE1_CELLS:-0,1,2,3,4,5}"
 ALL=()
 for sd in 1000 2000 3000; do
   for c in ${PHASE1_CELLS//,/ }; do
-    [ "$c" -ge 0 ] && [ "$c" -le 7 ] || { echo "FATAL: PHASE1_CELLS has '$c' (valid 0-7)."; exit 1; }
+    [ "$c" -ge 0 ] && [ "$c" -le 9 ] || { echo "FATAL: PHASE1_CELLS has '$c' (valid 0-9)."; exit 1; }
     ALL+=("${c}:${sd}")
   done
 done

@@ -1,7 +1,7 @@
 # SmolVLA on the Phase-1 datasets -- shared body, sourced by cluster/train_phase1.sbatch.
 # This file has NO #SBATCH directives: SLURM reads those only from the submitted wrapper.
 #
-# The caller must set PHASE1_CELL (0-7) before sourcing.
+# The caller must set PHASE1_CELL (0-9) before sourcing.
 #
 # These are SCRAPE-IsaacLab ablation_study Phase-1 runs, so the TRAINING arguments
 # follow the SCRAPE phase1 convention exactly (configs/ablation_study/phase1/
@@ -54,7 +54,7 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 # the budget from the staged copy and refuses to train when it disagrees with this table,
 # because a cell trained at the wrong epoch count is not comparable to its siblings and
 # nothing in the logs would say so.
-PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-7). Source this from cluster/train_phase1.sbatch.}"
+PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-9). Source this from cluster/train_phase1.sbatch.}"
 
 # VARIANT is the dataset-name suffix after 10fps, empty for the base cells. Cells 6 and 7
 # are the _via4cm pick_place sets -- same task and condition, different collection, so
@@ -69,7 +69,9 @@ case "$PHASE1_CELL" in
   5) TASK=sort_by_color;  COND=A2; VARIANT="";        FRAMES=74921; STEPS=58500 ;;
   6) TASK=pick_place;     COND=A1; VARIANT="_via4cm"; FRAMES=28530; STEPS=22250 ;;
   7) TASK=pick_place;     COND=A2; VARIANT="_via4cm"; FRAMES=28755; STEPS=22450 ;;
-  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-7)"; exit 1 ;;
+  8) TASK=sort_by_color;  COND=A1; VARIANT="_via4cm"; FRAMES=74505; STEPS=58200 ;;
+  9) TASK=sort_by_color;  COND=A2; VARIANT="_via4cm"; FRAMES=74827; STEPS=58450 ;;
+  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-9)"; exit 1 ;;
 esac
 
 HUB_USER=HyeonseokE

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SmolVLA on the Phase-1 _via4cm pick_place datasets -- SINGLE ENTRY POINT.
+# SmolVLA on the Phase-1 _via4cm datasets -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -7,8 +7,8 @@
 # This one job does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. prefetch   -- download the two datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the 6 training runs and exit
+#   3. prefetch   -- download the four datasets ONCE into $HOME/datasets/
+#   4. submit     -- queue the 12 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -18,15 +18,17 @@
 # 0-GPU job never qualifies for them. Keep the line.
 #
 # The GPU work proper happens in the jobs this one queues: 2 cells x 3 training seeds
-# = 6 runs, packed 3 to a GPU.
+# = 12 runs, packed 3 to a GPU.
 #
-#   pick_place A1 _via4cm   28,530 frames -> 22,250 steps  (~2.0 h)
-#   pick_place A2 _via4cm   28,755 frames -> 22,450 steps  (~2.0 h)
+#   pick_place    A1 _via4cm   28,530 frames -> 22,250 steps  (~2.7 h)
+#   pick_place    A2 _via4cm   28,755 frames -> 22,450 steps  (~2.7 h)
+#   sort_by_color A1 _via4cm   74,505 frames -> 58,200 steps  (~7.0 h)
+#   sort_by_color A2 _via4cm   74,827 frames -> 58,450 steps  (~7.0 h)
 #
-# These are cells 6 and 7 of the Phase-1 grid. They do NOT replace cells 1 and 4
-# (pick_place A1/A2) -- same task and condition, different collection, kept separate so
-# the two can be compared. This file exists so running just them needs no edit at
-# submit time; main_job_phase1.sbatch runs cells 0-5.
+# These are cells 6-9 of the Phase-1 grid. They do NOT replace cells 1/4/2/5 -- same
+# tasks and conditions, different collection, kept separate so the two can be compared.
+# There is no _via4cm push_button set. This file exists so running just them needs no
+# edit at submit time; main_job_phase1.sbatch runs cells 0-5.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -38,7 +40,7 @@
 # ablation_study uses), so the 15 runs never collide with each other.
 #
 # PACK is how many runs share one GPU (default 3) and the launcher runs two jobs at a
-# time, so the 6 runs land as 2 tasks. PACKED=0 falls back to one run per GPU.
+# time, so the 12 runs land as 4 tasks. PACKED=0 falls back to one run per GPU.
 #
 #SBATCH --job-name=via4cm-main
 #SBATCH --partition=gpu
@@ -127,6 +129,8 @@ ROOT = Path(os.environ["DATASETS_DIR"])
 REPOS = [
     "HyeonseokE/phase1_pick_place_A1_10fps_via4cm",
     "HyeonseokE/phase1_pick_place_A2_10fps_via4cm",
+    "HyeonseokE/phase1_sort_by_color_A1_10fps_via4cm",
+    "HyeonseokE/phase1_sort_by_color_A2_10fps_via4cm",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -177,7 +181,7 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 6 training runs (2 _via4cm cells x seeds 1000/2000/3000) ==="
+echo "=== [4/4] submit 12 training runs (4 _via4cm cells x seeds 1000/2000/3000) ==="
 JOBNAME="smolvla-via4cm"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
@@ -196,7 +200,7 @@ fi
 # everything else. Export into this shell's environment and let --export=ALL carry it.
 # Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
 # point of this file existing separately from main_job_phase1.sbatch.
-export PHASE1_CELLS="6,7"
+export PHASE1_CELLS="6,7,8,9"
 export PACK="${PACK:-3}"
 echo "=== cells=$PHASE1_CELLS  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"

@@ -70,15 +70,19 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 | 3 | push_button | A2 | 11,380 | 8,850 | ~0.8h |
 | 4 | pick_place | A2 | 31,526 | 24,600 | ~2.2h |
 | 5 | sort_by_color | A2 | 74,921 | 58,500 | ~5.2h |
-| 6 | pick_place `_via4cm` | A1 | 28,530 | 22,250 | ~2.0h |
-| 7 | pick_place `_via4cm` | A2 | 28,755 | 22,450 | ~2.0h |
+| 6 | pick_place `_via4cm` | A1 | 28,530 | 22,250 | ~2.7h |
+| 7 | pick_place `_via4cm` | A2 | 28,755 | 22,450 | ~2.7h |
+| 8 | sort_by_color `_via4cm` | A1 | 74,505 | 58,200 | ~7.0h |
+| 9 | sort_by_color `_via4cm` | A2 | 74,827 | 58,450 | ~7.0h |
 
-셀 6·7 은 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5).
+셀 6~9 는 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5).
 전용 진입점이 따로 있다 — 붙여넣고 던지면 끝, 수정할 게 없다:
 
 ```
-cluster/main_job_via4cm.sbatch     ← 셀 6,7 × 3시드 = 6런
+cluster/main_job_via4cm.sbatch     ← 셀 6,7,8,9 × 3시드 = 12런
 ```
+
+`_via4cm` push_button 데이터셋은 없다 (2026-09-01 확인).
 
 셀 1·4 를 대체하는 게 아니라 **비교 대상**이므로 별도 셀로 둔다. 모델 이름은
 `smolvla_phase1_pick_place_A1_via4cm_<seed>_10fps` 로 조건 뒤에 변형이 붙는다.
