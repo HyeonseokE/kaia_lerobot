@@ -76,11 +76,15 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 | 9 | sort_by_color `_via4cm` | A2 | 74,827 | 58,450 | ~7.0h |
 
 셀 6~9 는 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5).
-전용 진입점이 따로 있다 — 붙여넣고 던지면 끝, 수정할 게 없다:
+태스크별로 전용 진입점이 있다 — 붙여넣고 던지면 끝, 수정할 게 없다:
 
 ```
-cluster/main_job_via4cm.sbatch     ← 셀 6,7,8,9 × 3시드 = 12런
+cluster/main_job_via4cm.sbatch          ← 셀 6,7 pick_place    × 3시드 = 6런
+cluster/main_job_via4cm_sort.sbatch     ← 셀 8,9 sort_by_color × 3시드 = 6런
 ```
+
+둘은 잡 이름이 달라(`smolvla-via4cm-pp` / `smolvla-via4cm-sort`) 동시에 큐에 넣어도
+중복 가드가 서로를 막지 않는다.
 
 `_via4cm` push_button 데이터셋은 없다 (2026-09-01 확인).
 

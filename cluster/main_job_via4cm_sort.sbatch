@@ -1,5 +1,5 @@
 #!/bin/bash
-# SmolVLA on the Phase-1 _via4cm pick_place datasets -- SINGLE ENTRY POINT.
+# SmolVLA on the Phase-1 _via4cm sort_by_color datasets -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -20,13 +20,13 @@
 # The GPU work proper happens in the jobs this one queues: 2 cells x 3 training seeds
 # = 6 runs, packed 3 to a GPU.
 #
-#   pick_place A1 _via4cm   28,530 frames -> 22,250 steps  (~2.7 h)
-#   pick_place A2 _via4cm   28,755 frames -> 22,450 steps  (~2.7 h)
+#   sort_by_color A1 _via4cm   74,505 frames -> 58,200 steps  (~7.0 h)
+#   sort_by_color A2 _via4cm   74,827 frames -> 58,450 steps  (~7.0 h)
 #
-# These are cells 6 and 7 of the Phase-1 grid. They do NOT replace cells 1 and 4 -- same
+# These are cells 8 and 9 of the Phase-1 grid. They do NOT replace cells 2 and 5 -- same
 # task and condition, different collection, kept separate so the two can be compared.
-# The sort_by_color _via4cm cells (8, 9) are a SEPARATE submission:
-# cluster/main_job_via4cm_sort.sbatch. main_job_phase1.sbatch runs cells 0-5.
+# The pick_place _via4cm cells (6, 7) are a SEPARATE submission:
+# cluster/main_job_via4cm.sbatch. main_job_phase1.sbatch runs cells 0-5.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -40,13 +40,13 @@
 # PACK is how many runs share one GPU (default 3) and the launcher runs two jobs at a
 # time, so the 6 runs land as 2 tasks. PACKED=0 falls back to one run per GPU.
 #
-#SBATCH --job-name=via4cm-pp-main
+#SBATCH --job-name=via4cm-sort-main
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1        # never used -- see above
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=06:00:00
-#SBATCH --output=slurm-via4cm-pp-main-%j.out
+#SBATCH --output=slurm-via4cm-sort-main-%j.out
 
 set -euo pipefail
 
@@ -54,7 +54,7 @@ set -euo pipefail
 # "$HOME" are both undefined and `set -u` kills the script on first use.
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export USER="${USER:-$(id -un)}"
-echo "=== via4cm-pp-main start: $(date) on $(hostname) ==="
+echo "=== via4cm-sort-main start: $(date) on $(hostname) ==="
 echo "HOME=$HOME USER=$USER"
 
 IMAGE="docker://hyeonseoke/lerobot:v1"   # explicit tag -- :latest would serve a stale cached SIF
@@ -125,8 +125,8 @@ ROOT = Path(os.environ["DATASETS_DIR"])
 # SCRAPE-IsaacLab ablation_study Phase-1, the _via4cm pick_place collections. Both:
 # 100 episodes, 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
 REPOS = [
-    "HyeonseokE/phase1_pick_place_A1_10fps_via4cm",
-    "HyeonseokE/phase1_pick_place_A2_10fps_via4cm",
+    "HyeonseokE/phase1_sort_by_color_A1_10fps_via4cm",
+    "HyeonseokE/phase1_sort_by_color_A2_10fps_via4cm",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -177,11 +177,11 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 6 training runs (2 pick_place _via4cm cells x seeds 1000/2000/3000) ==="
-JOBNAME="smolvla-via4cm-pp"
+echo "=== [4/4] submit 6 training runs (2 sort_by_color _via4cm cells x seeds 1000/2000/3000) ==="
+JOBNAME="smolvla-via4cm-sort"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING via4cm pick_place training job(s) are already queued or running."
+  echo "FATAL: $RUNNING via4cm sort_by_color training job(s) are already queued or running."
   echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
   echo "       or submit just the missing runs with an explicit --array:"
   echo "         sbatch --array=<subset> cluster/train_phase1.sbatch"
@@ -196,11 +196,11 @@ fi
 # everything else. Export into this shell's environment and let --export=ALL carry it.
 # Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
 # point of this file existing separately from main_job_phase1.sbatch.
-export PHASE1_CELLS="6,7"
+export PHASE1_CELLS="8,9"
 export PACK="${PACK:-3}"
 echo "=== cells=$PHASE1_CELLS  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
-echo "=== via4cm-pp-main done: $(date) ==="
+echo "=== via4cm-sort-main done: $(date) ==="
