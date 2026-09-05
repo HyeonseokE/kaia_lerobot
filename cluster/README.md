@@ -147,12 +147,24 @@ compute-matched 대조군과 같은 논리이고, 모델 이름의 `_cm` 도 그
 `--policy.scheduler_decay_steps` 도 29,100 으로 묶여 LR 스케줄까지 동일하다. 그래서
 epoch-matched 체크포인트에서 이어붙일 수 없다 — 항상 fresh run 이다.
 
-5셀 × 3시드 = **15런**, GPU 한 장에 3개씩 5태스크, GPU 2장이면 ~11h.
+**시드는 하나만 돈다** (기본 1000). 이 실험은 고정 step 예산에서 데이터셋을 바꾸는 것이라
+시드가 스윕 축이 아니다. 5런, GPU 한 장에 3개씩 2태스크, ~7h.
 
-일부만 돌리려면:
+모델 이름은 이 계열에 이미 쓰이는 규칙을 따른다 (Hub 의
+`smolvla_pickandplace_per5_ikaction_10fps_13050step_s2000`):
+
+```
+smolvla_<taskset>_<per>_ikaction_10fps_<steps>step_s<seed>
+```
+
+**step 수가 이름에 들어간다.** 이 런들은 epoch 이 아니라 연산 예산으로 구분되므로,
+같은 데이터셋에 다른 예산을 한 번만 더 돌려도 이름이 없으면 구별이 안 된다.
+
+일부만, 혹은 다른 시드로:
 
 ```
 RCM_CELLS=4 sbatch --export=ALL cluster/main_job_redundancy_cm.sbatch
+SEED=2000   sbatch --export=ALL cluster/main_job_redundancy_cm.sbatch
 ```
 
 ### D. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)

@@ -81,17 +81,23 @@ DS="redundancy_${TASKSET}_${PER}_ikaction_10fps"
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 
-# Training seed. The house convention (configs/ablation_study/README.md) is three runs
-# per cell -- 1000, 2000, 3000 -- reported as mean +/- std over seeds, because the unit
-# of analysis is the training run, not the rollout. The seed sits before 10fps in the
-# model name so the three never collide.
+# ONE training seed per submission, not a 1000/2000/3000 grid -- this study varies the
+# dataset at a fixed step budget, so seeds are not the axis being swept. SEED picks it;
+# 1000 by default.
 SEED="${SEED:-1000}"
 case "$SEED" in
-  1000|2000|3000) ;;
-  *) echo "FATAL: SEED='$SEED' -- expected 1000, 2000 or 3000."; exit 1 ;;
+  ''|*[!0-9]*) echo "FATAL: SEED='$SEED' is not a number."; exit 1 ;;
 esac
-# _cm marks compute-matched, the same suffix RQ1 used for its matched control.
-NAME="smolvla_redundancy_${TASKSET}_${PER}_ikaction_cm_${SEED}_10fps"
+
+# Naming follows the convention already in use for this family on the Hub, e.g.
+# smolvla_pickandplace_per5_ikaction_10fps_13050step_s2000:
+#
+#   smolvla_<taskset>_<per>_ikaction_10fps_<steps>step_s<seed>
+#
+# The step count is IN the name on purpose. These runs are distinguished by their
+# compute budget, not by epochs, so a name without it would be ambiguous the moment a
+# second budget is tried on the same dataset -- which is exactly what this study does.
+NAME="smolvla_${TASKSET}_${PER}_ikaction_10fps_${STEPS}step_s${SEED}"
 
 # Final checkpoint only, matching the other SCRAPE training scripts.
 #

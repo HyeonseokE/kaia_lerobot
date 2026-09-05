@@ -8,7 +8,7 @@
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
 #   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the 15 training runs and exit
+#   4. submit     -- queue the 5 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -18,7 +18,7 @@
 # 0-GPU job never qualifies for them. Keep the line.
 #
 # The GPU work proper happens in the jobs this one queues: 2 cells x 3 training seeds
-# = 15 runs, packed 3 to a GPU.
+# = 5 runs, packed 3 to a GPU.
 #
 #   stack_2_cubes per1    3,291 frames -> 29,100 steps = 565.9 epochs  (~3.5 h)
 #   stack_2_cubes per3   10,700 frames -> 29,100 steps = 174.1 epochs  (~3.5 h)
@@ -34,7 +34,8 @@
 # only difference. Same reasoning as RQ1's compute-matched control; see
 # cluster/train_redundancy_cm_body.sh.
 #
-# 5 cells x 3 seeds = 15 runs, packed 3 to a GPU = 5 array tasks, ~11 h on two GPUs.
+# 5 runs (one seed, not a 1000/2000/3000 grid), packed 3 to a GPU = 2 array tasks,
+# ~7 h on one GPU. SEED picks the seed, 1000 by default.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -183,8 +184,8 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 15 training runs (5 cells x seeds 1000/2000/3000) ==="
-JOBNAME="smolvla-rcm"
+echo "=== [4/4] submit 5 training runs (5 cells, seed ${SEED:-1000}) ==="
+JOBNAME="smolvla-rcm-s${SEED:-1000}"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
   echo "FATAL: $RUNNING redundancy compute-matched training job(s) are already queued or running."
@@ -203,8 +204,9 @@ fi
 # Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
 # point of this file existing separately from main_job_phase1.sbatch.
 export RCM_CELLS="${RCM_CELLS:-0,1,2,3,4}"
+export SEED="${SEED:-1000}"
 export PACK="${PACK:-3}"
-echo "=== cells=$RCM_CELLS  pack=$PACK ==="
+echo "=== cells=$RCM_CELLS  seed=$SEED  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
 
 echo

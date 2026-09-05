@@ -8,7 +8,7 @@
 # Cells: 0-3 stack_2_cubes per1/per3/per5/per10 @ 29,100 steps
 #        4   pickandplace per1                @ 25,050 steps (RQ1 B budget)
 #
-# The run list is (cells) x (seeds 1000, 2000, 3000) = 15 runs and each array task takes
+# The run list is one entry per cell at a single seed = 5 runs, and each array task takes
 # PACK of it, so --array=0-7 covers it with room to spare -- tasks past the end exit 0.
 # RCM_CELLS picks a subset:
 #
@@ -70,8 +70,11 @@ export NUM_WORKERS="${NUM_WORKERS:-3}"
 # That is what lets one static --array line serve any subset.
 RCM_CELLS="${RCM_CELLS:-0,1,2,3,4}"
 
+# ONE seed, not a grid: the run list is just the cells.
+SEED="${SEED:-1000}"
+export SEED
 ALL=()
-for sd in 1000 2000 3000; do
+for sd in "$SEED"; do
   for c in ${RCM_CELLS//,/ }; do
     [ "$c" -ge 0 ] && [ "$c" -le 4 ] || { echo "FATAL: RCM_CELLS has '$c' (valid 0-4)."; exit 1; }
     ALL+=("${c}:${sd}")
