@@ -74,6 +74,7 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 | 7 | pick_place `_via4cm` | A2 | 28,755 | 22,450 | ~2.7h |
 | 8 | sort_by_color `_via4cm` | A1 | 74,505 | 58,200 | ~7.0h |
 | 9 | sort_by_color `_via4cm` | A2 | 74,827 | 58,450 | ~7.0h |
+| 10 | sort_by_color (A0, vanilla CaP) | A0 | 74,450 | 58,150 | ~7.0h |
 
 셀 6~9 는 `_via4cm` 변형이라 **기본에 포함되지 않는다** (기본은 0-5).
 태스크별로 전용 진입점이 있다 — 붙여넣고 던지면 끝, 수정할 게 없다:
@@ -81,7 +82,13 @@ Hub 와 일치하는 데이터셋을 건너뛰고, 제출 단계는 cap300 잡�
 ```
 cluster/main_job_via4cm.sbatch          ← 셀 6,7 pick_place    × 3시드 = 6런
 cluster/main_job_via4cm_sort.sbatch     ← 셀 8,9 sort_by_color × 3시드 = 6런
+cluster/main_job_ablation_sort.sbatch   ← 셀 10  sort_by_color A0 × 3시드 = 3런
 ```
+
+셀 10 은 `ablation_sort_by_color_100_10fps` (A0 / vanilla CaP, 섭동 없음) 이다.
+A0 vs A1 vs A2 비교의 기준선이고, 이름 규칙도 phase1 이 아니라 ablation_study 것을
+따른다 — `smolvla_ablation_<task>_<seed>_10fps`. 본체의 `DS_SET` / `NAME_SET` 가
+그 예외를 처리한다.
 
 둘은 잡 이름이 달라(`smolvla-via4cm-pp` / `smolvla-via4cm-sort`) 동시에 큐에 넣어도
 중복 가드가 서로를 막지 않는다.

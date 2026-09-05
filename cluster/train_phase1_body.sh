@@ -1,7 +1,7 @@
 # SmolVLA on the Phase-1 datasets -- shared body, sourced by cluster/train_phase1.sbatch.
 # This file has NO #SBATCH directives: SLURM reads those only from the submitted wrapper.
 #
-# The caller must set PHASE1_CELL (0-9) before sourcing.
+# The caller must set PHASE1_CELL (0-10) before sourcing.
 #
 # These are SCRAPE-IsaacLab ablation_study Phase-1 runs, so the TRAINING arguments
 # follow the SCRAPE phase1 convention exactly (configs/ablation_study/phase1/
@@ -54,7 +54,15 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 # the budget from the staged copy and refuses to train when it disagrees with this table,
 # because a cell trained at the wrong epoch count is not comparable to its siblings and
 # nothing in the logs would say so.
-PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-9). Source this from cluster/train_phase1.sbatch.}"
+PHASE1_CELL="${PHASE1_CELL:?PHASE1_CELL not set (0-10). Source this from cluster/train_phase1.sbatch.}"
+
+# Most cells derive their dataset and model names from TASK/COND/VARIANT. Cell 10 does
+# not: it is the A0 (vanilla CaP) set, which lives under ablation_study's own naming
+# (ablation_<task>_100_10fps -> smolvla_ablation_<task>_<seed>_10fps, see
+# configs/ablation_study/README.md), not phase1's. DS_SET / NAME_SET override the
+# derivation for cells like that; empty means derive.
+DS_SET=""
+NAME_SET=""
 
 # VARIANT is the dataset-name suffix after 10fps, empty for the base cells. Cells 6 and 7
 # are the _via4cm pick_place sets -- same task and condition, different collection, so
@@ -71,11 +79,14 @@ case "$PHASE1_CELL" in
   7) TASK=pick_place;     COND=A2; VARIANT="_via4cm"; FRAMES=28755; STEPS=22450 ;;
   8) TASK=sort_by_color;  COND=A1; VARIANT="_via4cm"; FRAMES=74505; STEPS=58200 ;;
   9) TASK=sort_by_color;  COND=A2; VARIANT="_via4cm"; FRAMES=74827; STEPS=58450 ;;
-  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-9)"; exit 1 ;;
+  10) TASK=sort_by_color; COND=A0; VARIANT="";        FRAMES=74450; STEPS=58150
+      DS_SET="ablation_sort_by_color_100_10fps"
+      NAME_SET="smolvla_ablation_sort_by_color" ;;
+  *) echo "FATAL: bad PHASE1_CELL='$PHASE1_CELL' (expected 0-10)"; exit 1 ;;
 esac
 
 HUB_USER=HyeonseokE
-DS="phase1_${TASK}_${COND}_10fps${VARIANT}"
+DS="${DS_SET:-phase1_${TASK}_${COND}_10fps${VARIANT}}"
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 
@@ -108,7 +119,7 @@ case "$SEED" in
   1000|2000|3000) ;;
   *) echo "FATAL: SEED='$SEED' -- phase1 requires 1000, 2000 or 3000 (phase1_README.md)."; exit 1 ;;
 esac
-NAME="smolvla_phase1_${TASK}_${COND}${VARIANT}_${SEED}_10fps"
+NAME="${NAME_SET:-smolvla_phase1_${TASK}_${COND}${VARIANT}}_${SEED}_10fps"
 
 # Final checkpoint only, matching the phase1 scripts.
 #
