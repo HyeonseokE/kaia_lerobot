@@ -19,8 +19,8 @@ OOD Job Composer → New Job → 파일 내용을 붙여넣고 Submit. `#SBATCH`
 
 ## 실험별 — 무엇을 어떤 순서로
 
-D 와 E 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
-`FATAL: ... _body.sh not found` 로 즉사한다. A·B·C 는 `main_job*.sbatch` 가 클론까지 하므로
+E 와 F 는 **0번을 먼저 한 번** 돌려야 한다. `$HOME/lerobot` 체크아웃이 없으면 학습 잡이
+`FATAL: ... _body.sh not found` 로 즉사한다. A~D 는 `main_job*.sbatch` 가 클론까지 하므로
 0번이 필요 없다.
 
 | # | 파일 | 언제 |
@@ -117,7 +117,33 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
-### C. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
+### C. SmolVLA — redundancy stack_2_cubes, compute-matched
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_redundancy_cm.sbatch`** | **이것 하나만 던진다** |
+
+**여기만 step 규칙이 다르다.** 다른 실험은 전부 `floor(frames/64)×50` 으로 데이터셋마다
+50 epoch 을 맞추지만, 이 실험은 **네 개가 모두 같은 29,100 step** 을 돈다 — per10(가장 큰
+셋)의 50 epoch 에 해당하는 값이다.
+
+| cell | dataset | frames | steps | 실효 epoch |
+|---|---|---|---|---|
+| 0 | `redundancy_stack_2_cubes_per1_ikaction_10fps` | 3,291 | 29,100 | 565.9 |
+| 1 | `..._per3_...` | 10,700 | 29,100 | 174.1 |
+| 2 | `..._per5_...` | 17,940 | 29,100 | 103.8 |
+| 3 | `..._per10_...` | 37,272 | 29,100 | 50.0 |
+
+epoch 을 고정하면 데이터가 큰 쪽이 gradient step 도 더 받아서 **"데이터가 많아서"와
+"iteration 이 많아서"가 섞인다.** step 을 고정하면 데이터만 다른 비교가 된다. RQ1 의
+compute-matched 대조군과 같은 논리이고, 모델 이름의 `_cm` 도 그 선례를 따른다.
+
+`--policy.scheduler_decay_steps` 도 29,100 으로 묶여 LR 스케줄까지 동일하다. 그래서
+epoch-matched 체크포인트에서 이어붙일 수 없다 — 항상 fresh run 이다.
+
+4셀 × 3시드 = **12런**, GPU 한 장에 3개씩 4태스크, GPU 2장이면 ~7h.
+
+### D. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -158,7 +184,7 @@ benchmark table 셀이 아니다. 이쪽은 **50 epoch / batch 64** — pick_pla
 sort_by_color 의 CaP 셀이 재사용하는 `ablation_*` 모델과 같은 예산이어야 표의 행이
 비교 가능하기 때문이다.
 
-### D. SmolVLA — towel_fold01, delta action
+### E. SmolVLA — towel_fold01, delta action
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -166,7 +192,7 @@ sort_by_color 의 CaP 셀이 재사용하는 `ablation_*` 모델과 같은 예�
 | 2 | `train_delta_step{0,1,2,3}.sbatch` | 스텝 하나만 띄울 때. 이쪽을 기본으로 |
 | 2' | `train_delta.sbatch` | 여러 스텝을 한 번에 (`--array`). 이미 도는 스텝은 넣지 말 것 |
 
-### E. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
+### F. SmolVLA — towel_fold01 / lekiwi, absolute action (베이스라인)
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -179,8 +205,8 @@ sort_by_color 의 CaP 셀이 재사용하는 `ablation_*` 모델과 같은 예�
    OOD Files 앱으로 만든다. 없으면 학습 잡이 시작 직후 FATAL.
 2. 수정한 스크립트가 **GitHub `main` 에 push 되어 있을 것**. 잡은 `$HOME/lerobot` 을
    `git pull --ff-only` 로 갱신해서 `_body.sh` 와 `src/lerobot` 을 읽는다.
-3. (D·E) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
-   `FATAL: $HOME/datasets/... not found`. A·B·C 는 `main_job*.sbatch` 가 순서를 보장한다.
+3. (E·F) prefetch 를 **완주**시킨 뒤에 학습을 던질 것. 순서가 뒤바뀌면
+   `FATAL: $HOME/datasets/... not found`. A~D 는 `main_job*.sbatch` 가 순서를 보장한다.
 
 ## 자동 pull 이 닿지 않는 곳 — 함정
 
