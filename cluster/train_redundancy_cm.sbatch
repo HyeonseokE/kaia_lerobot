@@ -5,13 +5,14 @@
 # so "more data" is separated from "more gradient steps". See
 # cluster/train_redundancy_cm_body.sh for why.
 #
-# Cells: 0 per1 | 1 per3 | 2 per5 | 3 per10
+# Cells: 0-3 stack_2_cubes per1/per3/per5/per10 @ 29,100 steps
+#        4   pickandplace per1                @ 25,050 steps (RQ1 B budget)
 #
-# The run list is (cells) x (seeds 1000, 2000, 3000) = 12 runs and each array task takes
+# The run list is (cells) x (seeds 1000, 2000, 3000) = 15 runs and each array task takes
 # PACK of it, so --array=0-7 covers it with room to spare -- tasks past the end exit 0.
 # RCM_CELLS picks a subset:
 #
-#   RCM_CELLS=0,3 sbatch --export=ALL cluster/train_redundancy_cm.sbatch
+#   RCM_CELLS=4 sbatch --export=ALL cluster/train_redundancy_cm.sbatch   # pickandplace only
 #   (NOT --export=ALL,RCM_CELLS=0,3 -- sbatch splits --export on commas)
 #
 # SLURM allocates a GPU exclusively to a job, so separate jobs can never share one. The
@@ -63,16 +64,16 @@ K="$SLURM_ARRAY_TASK_ID"
 # of each step and has room to lose most of its parallelism before the GPU ever waits.
 export NUM_WORKERS="${NUM_WORKERS:-3}"
 
-# RCM_CELLS restricts which cells take part. Default is all four. The run list is built
+# RCM_CELLS restricts which cells take part. Default is all five. The run list is built
 # cell-major within each seed, and this task takes the PACK entries starting at K*PACK --
 # so a shorter list simply leaves the high array tasks with nothing to do and they exit 0.
 # That is what lets one static --array line serve any subset.
-RCM_CELLS="${RCM_CELLS:-0,1,2,3}"
+RCM_CELLS="${RCM_CELLS:-0,1,2,3,4}"
 
 ALL=()
 for sd in 1000 2000 3000; do
   for c in ${RCM_CELLS//,/ }; do
-    [ "$c" -ge 0 ] && [ "$c" -le 3 ] || { echo "FATAL: RCM_CELLS has '$c' (valid 0-3)."; exit 1; }
+    [ "$c" -ge 0 ] && [ "$c" -le 4 ] || { echo "FATAL: RCM_CELLS has '$c' (valid 0-4)."; exit 1; }
     ALL+=("${c}:${sd}")
   done
 done

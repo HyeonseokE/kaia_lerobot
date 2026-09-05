@@ -1,8 +1,8 @@
-# SmolVLA on the redundancy_stack_2_cubes per-N sets -- COMPUTE-MATCHED. Shared body,
+# SmolVLA on the redundancy per-N sets -- COMPUTE-MATCHED. Shared body,
 # sourced by cluster/train_redundancy_cm.sbatch. No #SBATCH directives here: SLURM reads
 # those only from the submitted wrapper.
 #
-# The caller must set RCM_CELL (0-3) before sourcing.
+# The caller must set RCM_CELL (0-4) before sourcing.
 #
 # WHAT IS DIFFERENT FROM EVERY OTHER BODY IN THIS DIRECTORY
 #
@@ -10,10 +10,11 @@
 # scaling with dataset size. Here they are NOT. All four runs train for the SAME 29,100
 # steps, which is what 50 epochs works out to on per10, the largest set:
 #
-#   per1    3,291 frames -> 29,100 steps = 565.9 epochs
-#   per3   10,700 frames -> 29,100 steps = 174.1 epochs
-#   per5   17,940 frames -> 29,100 steps = 103.8 epochs
-#   per10  37,272 frames -> 29,100 steps =  50.0 epochs
+#   stack_2_cubes per1    3,291 frames -> 29,100 steps = 565.9 epochs
+#   stack_2_cubes per3   10,700 frames -> 29,100 steps = 174.1 epochs
+#   stack_2_cubes per5   17,940 frames -> 29,100 steps = 103.8 epochs
+#   stack_2_cubes per10  37,272 frames -> 29,100 steps =  50.0 epochs
+#   pickandplace  per1    3,350 frames -> 25,050 steps = 478.6 epochs
 #
 # The point is to separate "more data" from "more gradient steps". With epochs fixed, a
 # bigger dataset also gets more iterations, and the two explanations are confounded --
@@ -43,29 +44,40 @@ IMAGE="docker://hyeonseoke/lerobot:v1"   # explicit tag -- :latest would serve a
 # left_wrist. Without the rename the pretrained vision weights are not used at all.
 CAM2='{"observation.images.top": "observation.images.camera1", "observation.images.left_wrist": "observation.images.camera2"}'
 
-# The shared budget. Derived from per10 and asserted against it below, so a re-upload
-# of per10 cannot silently change what "compute-matched" means.
-REF_FRAMES=37272
-STEPS=29100
-
-RCM_CELL="${RCM_CELL:?RCM_CELL not set (0-3). Source this from cluster/train_redundancy_cm.sbatch.}"
+# Two GROUPS, each compute-matched to its own reference. STEPS is fixed per group, not
+# per dataset -- that is the point -- and REF_FRAMES records where the number came from
+# so a re-upload of the reference set cannot silently redefine it.
+#
+#   stack_2_cubes  29,100 = floor(37272/64) * 50, i.e. 50 epochs on per10, the largest
+#                  set in that group.
+#   pickandplace   25,050 = the budget RQ1 condition B ran. Matching it makes this run
+#                  comparable to RQ1's existing numbers, not just to its own siblings.
+#                  See configs/RQ1:redundancy/pickandplace/
+#                  train_smolvla_A_test_ik_action_10fps_computematched.sh.
+#
+# REF_FRAMES="" means the budget is external (RQ1's) rather than derived here, so the
+# derivation check below is skipped for that cell.
+RCM_CELL="${RCM_CELL:?RCM_CELL not set (0-4). Source this from cluster/train_redundancy_cm.sbatch.}"
 
 case "$RCM_CELL" in
-  0) PER=per1;  FRAMES=3291  ;;
-  1) PER=per3;  FRAMES=10700 ;;
-  2) PER=per5;  FRAMES=17940 ;;
-  3) PER=per10; FRAMES=37272 ;;
-  *) echo "FATAL: bad RCM_CELL='$RCM_CELL' (expected 0-3)"; exit 1 ;;
+  0) TASKSET=stack_2_cubes; PER=per1;  FRAMES=3291;  STEPS=29100; REF_FRAMES=37272 ;;
+  1) TASKSET=stack_2_cubes; PER=per3;  FRAMES=10700; STEPS=29100; REF_FRAMES=37272 ;;
+  2) TASKSET=stack_2_cubes; PER=per5;  FRAMES=17940; STEPS=29100; REF_FRAMES=37272 ;;
+  3) TASKSET=stack_2_cubes; PER=per10; FRAMES=37272; STEPS=29100; REF_FRAMES=37272 ;;
+  4) TASKSET=pickandplace;  PER=per1;  FRAMES=3350;  STEPS=25050; REF_FRAMES=""     ;;
+  *) echo "FATAL: bad RCM_CELL='$RCM_CELL' (expected 0-4)"; exit 1 ;;
 esac
 
-WANT_REF="$(awk -v f="$REF_FRAMES" 'BEGIN{ printf "%d", int(f/64) * 50 }')"
-if [ "$WANT_REF" != "$STEPS" ]; then
-  echo "FATAL: REF_FRAMES=$REF_FRAMES gives $WANT_REF steps, but STEPS=$STEPS."
-  exit 1
+if [ -n "$REF_FRAMES" ]; then
+  WANT_REF="$(awk -v f="$REF_FRAMES" 'BEGIN{ printf "%d", int(f/64) * 50 }')"
+  if [ "$WANT_REF" != "$STEPS" ]; then
+    echo "FATAL: REF_FRAMES=$REF_FRAMES gives $WANT_REF steps, but STEPS=$STEPS."
+    exit 1
+  fi
 fi
 
 HUB_USER=HyeonseokE
-DS="redundancy_stack_2_cubes_${PER}_ikaction_10fps"
+DS="redundancy_${TASKSET}_${PER}_ikaction_10fps"
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 
@@ -79,7 +91,7 @@ case "$SEED" in
   *) echo "FATAL: SEED='$SEED' -- expected 1000, 2000 or 3000."; exit 1 ;;
 esac
 # _cm marks compute-matched, the same suffix RQ1 used for its matched control.
-NAME="smolvla_redundancy_stack_2_cubes_${PER}_ikaction_cm_${SEED}_10fps"
+NAME="smolvla_redundancy_${TASKSET}_${PER}_ikaction_cm_${SEED}_10fps"
 
 # Final checkpoint only, matching the other SCRAPE training scripts.
 #
@@ -207,7 +219,7 @@ echo "${SLURM_JOB_ID:-unknown}" > "$LOCK"
 trap 'rm -f "$LOCK"' EXIT
 
 echo "=== Job start: $(date) on $(hostname) ==="
-echo "=== redundancy-cm / $PER: $NAME  dataset=$DATASET  frames=$SRC_FRAMES  steps=$STEPS (compute-matched, $(awk -v s=$STEPS -v f=$SRC_FRAMES 'BEGIN{printf "%.1f", s*64/f}') epochs, batch 64, seed $SEED) ==="
+echo "=== redundancy-cm / $TASKSET $PER: $NAME  dataset=$DATASET  frames=$SRC_FRAMES  steps=$STEPS (compute-matched, $(awk -v s=$STEPS -v f=$SRC_FRAMES 'BEGIN{printf "%.1f", s*64/f}') epochs, batch 64, seed $SEED) ==="
 nvidia-smi
 
 # ------------------------------------------------------------------- preflight

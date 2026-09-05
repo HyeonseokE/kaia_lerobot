@@ -1,5 +1,5 @@
 #!/bin/bash
-# SmolVLA on redundancy_stack_2_cubes per1/3/5/10, COMPUTE-MATCHED -- SINGLE ENTRY POINT.
+# SmolVLA on the redundancy per-N sets, COMPUTE-MATCHED -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -7,8 +7,8 @@
 # This one job does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. prefetch   -- download the four datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the 12 training runs and exit
+#   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
+#   4. submit     -- queue the 15 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -18,21 +18,23 @@
 # 0-GPU job never qualifies for them. Keep the line.
 #
 # The GPU work proper happens in the jobs this one queues: 2 cells x 3 training seeds
-# = 12 runs, packed 3 to a GPU.
+# = 15 runs, packed 3 to a GPU.
 #
-#   per1     3,291 frames -> 29,100 steps = 565.9 epochs  (~3.5 h)
-#   per3    10,700 frames -> 29,100 steps = 174.1 epochs  (~3.5 h)
-#   per5    17,940 frames -> 29,100 steps = 103.8 epochs  (~3.5 h)
-#   per10   37,272 frames -> 29,100 steps =  50.0 epochs  (~3.5 h)
+#   stack_2_cubes per1    3,291 frames -> 29,100 steps = 565.9 epochs  (~3.5 h)
+#   stack_2_cubes per3   10,700 frames -> 29,100 steps = 174.1 epochs  (~3.5 h)
+#   stack_2_cubes per5   17,940 frames -> 29,100 steps = 103.8 epochs  (~3.5 h)
+#   stack_2_cubes per10  37,272 frames -> 29,100 steps =  50.0 epochs  (~3.5 h)
+#   pickandplace  per1    3,350 frames -> 25,050 steps = 478.6 epochs  (~3.0 h)
 #
-# All four train for the SAME number of steps -- 50 epochs' worth on per10, the largest
-# set -- rather than 50 epochs each. That is the whole design: with epochs fixed, a
+# The step budget is fixed per GROUP rather than per dataset. stack_2_cubes uses 29,100
+# -- 50 epochs' worth on per10, its largest set. pickandplace per1 uses 25,050, the
+# budget RQ1 condition B ran, so it is comparable to RQ1's existing numbers too. That is the whole design: with epochs fixed, a
 # bigger dataset also gets more gradient steps, and "more data helped" cannot be
 # separated from "more iterations helped". Holding steps equal leaves the dataset as the
 # only difference. Same reasoning as RQ1's compute-matched control; see
 # cluster/train_redundancy_cm_body.sh.
 #
-# 4 cells x 3 seeds = 12 runs, packed 3 to a GPU = 4 array tasks, ~7 h on two GPUs.
+# 5 cells x 3 seeds = 15 runs, packed 3 to a GPU = 5 array tasks, ~11 h on two GPUs.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -123,13 +125,14 @@ from huggingface_hub import hf_hub_download, snapshot_download
 
 ROOT = Path(os.environ["DATASETS_DIR"])
 
-# SCRAPE-IsaacLab redundancy study, stack_2_cubes at four trajectories-per-layout
-# levels. 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
+# SCRAPE-IsaacLab redundancy study: stack_2_cubes at four trajectories-per-layout
+# levels, plus pickandplace per1. 10 fps, so101_follower, top + left_wrist @ 480x640.
 REPOS = [
     "HyeonseokE/redundancy_stack_2_cubes_per1_ikaction_10fps",
     "HyeonseokE/redundancy_stack_2_cubes_per3_ikaction_10fps",
     "HyeonseokE/redundancy_stack_2_cubes_per5_ikaction_10fps",
     "HyeonseokE/redundancy_stack_2_cubes_per10_ikaction_10fps",
+    "HyeonseokE/redundancy_pickandplace_per1_ikaction_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -180,7 +183,7 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 12 training runs (per1/3/5/10 x seeds 1000/2000/3000) ==="
+echo "=== [4/4] submit 15 training runs (5 cells x seeds 1000/2000/3000) ==="
 JOBNAME="smolvla-rcm"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
@@ -192,14 +195,14 @@ if [ "$RUNNING" -gt 0 ]; then
   exit 1
 fi
 
-# NOT --export=ALL,RCM_CELLS=0,1,2,3 -- sbatch splits --export on commas, and
+# NOT --export=ALL,RCM_CELLS=0,1,2,3,4 -- sbatch splits --export on commas, and
 # SLURM offers no escape for a comma inside a value. On 2026-08-29 that turned
 # a comma-separated list into its first element plus junk assignments, so the array
 # trained cell 0 at three seeds and reported "past the end of the 3-run list" for
 # everything else. Export into this shell's environment and let --export=ALL carry it.
 # Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
 # point of this file existing separately from main_job_phase1.sbatch.
-export RCM_CELLS="${RCM_CELLS:-0,1,2,3}"
+export RCM_CELLS="${RCM_CELLS:-0,1,2,3,4}"
 export PACK="${PACK:-3}"
 echo "=== cells=$RCM_CELLS  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"

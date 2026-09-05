@@ -117,7 +117,7 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
-### C. SmolVLA — redundancy stack_2_cubes, compute-matched
+### C. SmolVLA — redundancy, compute-matched
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -127,12 +127,18 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 50 epoch 을 맞추지만, 이 실험은 **네 개가 모두 같은 29,100 step** 을 돈다 — per10(가장 큰
 셋)의 50 epoch 에 해당하는 값이다.
 
+step 예산은 **데이터셋별이 아니라 그룹별**로 고정된다.
+
 | cell | dataset | frames | steps | 실효 epoch |
 |---|---|---|---|---|
 | 0 | `redundancy_stack_2_cubes_per1_ikaction_10fps` | 3,291 | 29,100 | 565.9 |
-| 1 | `..._per3_...` | 10,700 | 29,100 | 174.1 |
-| 2 | `..._per5_...` | 17,940 | 29,100 | 103.8 |
-| 3 | `..._per10_...` | 37,272 | 29,100 | 50.0 |
+| 1 | `..._stack_2_cubes_per3_...` | 10,700 | 29,100 | 174.1 |
+| 2 | `..._stack_2_cubes_per5_...` | 17,940 | 29,100 | 103.8 |
+| 3 | `..._stack_2_cubes_per10_...` | 37,272 | 29,100 | 50.0 |
+| 4 | `redundancy_pickandplace_per1_ikaction_10fps` | 3,350 | **25,050** | 478.6 |
+
+- `29,100` = `floor(37272/64)×50`, per10(그룹 최대)의 50 epoch
+- `25,050` = **RQ1 조건 B 가 돌린 값**. 이 값을 맞춰야 RQ1 기존 수치와도 비교된다
 
 epoch 을 고정하면 데이터가 큰 쪽이 gradient step 도 더 받아서 **"데이터가 많아서"와
 "iteration 이 많아서"가 섞인다.** step 을 고정하면 데이터만 다른 비교가 된다. RQ1 의
@@ -141,7 +147,13 @@ compute-matched 대조군과 같은 논리이고, 모델 이름의 `_cm` 도 그
 `--policy.scheduler_decay_steps` 도 29,100 으로 묶여 LR 스케줄까지 동일하다. 그래서
 epoch-matched 체크포인트에서 이어붙일 수 없다 — 항상 fresh run 이다.
 
-4셀 × 3시드 = **12런**, GPU 한 장에 3개씩 4태스크, GPU 2장이면 ~7h.
+5셀 × 3시드 = **15런**, GPU 한 장에 3개씩 5태스크, GPU 2장이면 ~11h.
+
+일부만 돌리려면:
+
+```
+RCM_CELLS=4 sbatch --export=ALL cluster/main_job_redundancy_cm.sbatch
+```
 
 ### D. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
 
