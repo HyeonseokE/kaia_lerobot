@@ -3,7 +3,8 @@
 #
 # ONE ARRAY TASK = ONE DATASET AT ALL THREE SEEDS (1000/2000/3000). The three runs are
 # packed onto that
-# task's single GPU -- 4 dataloader workers each -- so a task finishing means a whole
+# task's single GPU, PACK at a time with 8 dataloader workers each, so a task finishing
+# means a whole
 # benchmark-table row is complete rather than a third of three rows.
 #
 # Never more than two GPUs: --array=...%2 caps concurrent tasks at two and each task
@@ -28,14 +29,10 @@
 #SBATCH --job-name=smolvla-bench-ours
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=15          # 4 workers x 3 packed runs, plus the main threads
-                                    # At %2 that is 30 of the node's 64 CPUs, leaving
-                                    # room for other jobs. It was 27 (8 workers) and
-                                    # that is what CPU-starved the queue: 60 of 64 CPUs
-                                    # were held and a third task could not start with
-                                    # GPUs free. Costs nothing to lower -- data_s runs
-                                    # ~0.02 s against updt_s ~0.43, so the loader idles
-                                    # most of every step.
+#SBATCH --cpus-per-task=18          # 8 workers x PACK=2, plus the main threads
+                                    # At %2 that is 36 of the node's 64 CPUs. 8 workers
+                                    # x 3 packed needed 27, and two such tasks held 60
+                                    # of 64 -- a third could not start with GPUs free.
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00           # longest task is sort_by_color at ~7 h
 #SBATCH --array=0-10%2              # %2 = never more than two GPUs, one per task
@@ -81,31 +78,51 @@ if [ ! -f "$HOME/datasets/${TASK}_ours_10fps/meta/info.json" ]; then
 fi
 
 SEEDS="${SEEDS:-1000 2000 3000}"
-export NUM_WORKERS="${NUM_WORKERS:-4}"   # per training session
+export NUM_WORKERS="${NUM_WORKERS:-8}"   # per training session
+
+# How many of this task's seeds share the GPU at once. Three seeds at PACK=2 run as a
+# wave of two and then one, so the task still ends with a complete benchmark-table row.
+#
+# WHY NOT 3. Packing three measured updt_s 0.43 on 2026-08-29 -- 6.98 step/s against
+# 3.14 solo, a clear win -- but that was with the node half idle, only one array task
+# running because the other was CPU-starved. With both tasks up (six trainings on the
+# node) the same packing measured 0.94, i.e. 3.19 step/s: the whole gain gone, no better
+# than running one at a time. Two per GPU with 8 workers each is the middle setting;
+# whether it beats 0.94 shows up in the first log lines.
+PACK="${PACK:-2}"
 export OURS_TASK="$TASK"
 
 echo "=== task $K -> $TASK, seeds [$SEEDS] on one GPU: $(date) on $(hostname) ==="
 nvidia-smi
 
-# Each seed is its own PROCESS, not sourced: the body cd's, takes a per-run lock and
-# installs an EXIT trap, so two of them in one shell would collide.
-pids=()
-for sd in $SEEDS; do
-  LOG="bench_ours_${TASK}_s${sd}.log"
-  echo "=== launching $TASK seed $sd -> $LOG ==="
-  OURS_TASK="$TASK" SEED="$sd" NUM_WORKERS="$NUM_WORKERS" bash "$BODY" > "$LOG" 2>&1 &
-  pids+=("$!")
-  sleep 30      # stagger: three simultaneous /tmp staging copies would fight over NFS
-done
-
-echo "=== ${#pids[@]} run(s) launched; watch the per-run .log files ==="
-
-# Fail the task if any seed fails, but only once all have finished. A `wait -n` early
-# exit would orphan the survivors and the job teardown would kill them mid-training.
+# Seeds run in waves of PACK. Each is its own PROCESS, not sourced: the body cd's, takes
+# a per-run lock and installs an EXIT trap, so two of them in one shell would collide.
 rc=0
-for p in "${pids[@]}"; do
-  wait "$p" || rc=1
+wave=()
+run_wave() {
+  [ "${#wave[@]}" -gt 0 ] || return 0
+  local pids=() sd p
+  for sd in "${wave[@]}"; do
+    LOG="bench_ours_${TASK}_s${sd}.log"
+    echo "=== launching $TASK seed $sd -> $LOG ==="
+    OURS_TASK="$TASK" SEED="$sd" NUM_WORKERS="$NUM_WORKERS" bash "$BODY" > "$LOG" 2>&1 &
+    pids+=("$!")
+    sleep 30    # stagger: simultaneous /tmp staging copies would fight over NFS
+  done
+  echo "=== wave of ${#pids[@]} launched; watch the per-run .log files ==="
+  # Wait for the WHOLE wave before starting the next. A `wait -n` early exit would
+  # orphan the survivors and the job teardown would kill them mid-training.
+  for p in "${pids[@]}"; do
+    wait "$p" || rc=1
+  done
+  wave=()
+}
+
+for sd in $SEEDS; do
+  wave+=("$sd")
+  [ "${#wave[@]}" -lt "$PACK" ] || run_wave
 done
+run_wave      # trailing partial wave (3 seeds at PACK=2 leaves one)
 
 echo "=== task $K ($TASK) done: $(date) (rc=$rc) ==="
 exit "$rc"
