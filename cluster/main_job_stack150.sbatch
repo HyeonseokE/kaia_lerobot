@@ -1,5 +1,5 @@
 #!/bin/bash
-# SmolVLA on the redundancy per-N sets, COMPUTE-MATCHED -- SINGLE ENTRY POINT.
+# SmolVLA on stack_2_cubes per5/per10 at 150 EPOCHS -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -7,8 +7,8 @@
 # This one job does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. prefetch   -- download the five datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the 5 training runs and exit
+#   3. prefetch   -- download the two datasets ONCE into $HOME/datasets/
+#   4. submit     -- queue the 2 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -17,44 +17,36 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the jobs this one queues: 5 runs at ONE seed (not a
-# 1000/2000/3000 grid -- this study varies the dataset at a fixed budget, so the seed is
-# not the axis being swept). Packed 3 to a GPU = 2 array tasks, ~7 h on two GPUs.
+# The GPU work proper happens in the jobs this one queues: 2 runs at ONE seed.
 #
-#   stack_2_cubes per1    3,291 frames -> 29,100 steps = 565.9 epochs
-#   stack_2_cubes per3   10,700 frames -> 29,100 steps = 174.1 epochs
-#   stack_2_cubes per5   17,940 frames -> 29,100 steps = 103.8 epochs
-#   stack_2_cubes per10  37,272 frames -> 29,100 steps =  50.0 epochs
-#   pickandplace  per1    3,350 frames -> 25,050 steps = 478.6 epochs
+#   stack_2_cubes per5   17,940 frames -> 42,000 steps = 150 epochs  (~3.7 h)
+#   stack_2_cubes per10  37,272 frames -> 87,300 steps = 150 epochs  (~7.7 h)
 #
-# The step budget is fixed per GROUP rather than per dataset. stack_2_cubes uses 29,100
-# -- 50 epochs' worth on per10, its largest set. pickandplace per1 uses 25,050, the
-# budget RQ1 condition B ran, so it is comparable to RQ1's existing numbers too.
+# EPOCH-matched, not compute-matched: each trains 150 epochs on its own dataset, so
+# per10 gets more than twice per5's steps. These are cells 5 and 6 of the shared table
+# in cluster/train_redundancy_cm_body.sh; the compute-matched cells (0-4) are a separate
+# submission, cluster/main_job_redundancy_cm.sbatch.
 #
-# That is the whole design: with epochs fixed, a bigger dataset also gets more gradient
-# steps, and "more data helped" cannot be separated from "more iterations helped".
-# Holding steps equal leaves the dataset as the only difference. Same reasoning as RQ1's
-# compute-matched control; see cluster/train_redundancy_cm_body.sh.
+# PACK=1 by default here, unlike the compute-matched job: with only two runs, giving
+# each its own GPU finishes the pair in the time of the longer one (~7.7 h) instead of
+# ~10 h sharing one.
 #
-# The 150-epoch stack runs (cells 5-6) are a SEPARATE submission:
-# cluster/main_job_stack150.sbatch.
-#
-# SEED picks the seed (1000 by default) and rides in both the model name and the job
-# name, so submissions at different seeds do not trip each other's duplicate guard.
-# RCM_CELLS picks a subset of the five cells; PACK is runs per GPU.
+# SEED picks the seed (1000 by default) and rides in both the model name -- the step
+# count is in there too, so these do not collide with the 29,100-step runs on the same
+# datasets -- and the job name.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
 # Step 4 refuses to run if a job for THIS seed is already queued, so a resubmit will
 # not create duplicates.
 #
-#SBATCH --job-name=rcm-main
+#SBATCH --job-name=stack150-main
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1        # never used -- see above
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=06:00:00
-#SBATCH --output=slurm-rcm-main-%j.out
+#SBATCH --output=slurm-stack150-main-%j.out
 
 set -euo pipefail
 
@@ -62,7 +54,7 @@ set -euo pipefail
 # "$HOME" are both undefined and `set -u` kills the script on first use.
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export USER="${USER:-$(id -un)}"
-echo "=== rcm-main start: $(date) on $(hostname) ==="
+echo "=== stack150-main start: $(date) on $(hostname) ==="
 echo "HOME=$HOME USER=$USER"
 
 IMAGE="docker://hyeonseoke/lerobot:v1"   # explicit tag -- :latest would serve a stale cached SIF
@@ -98,7 +90,7 @@ echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse
 # There is only one launcher here; PACK controls how many runs share a GPU (3 by
 # default, PACK=1 for one per GPU).
 TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm.sbatch"
-echo "=== ${PACK:-3} run(s) per GPU ==="
+echo "=== ${PACK:-1} run(s) per GPU ==="
 for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_redundancy_cm_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
@@ -125,14 +117,11 @@ from huggingface_hub import hf_hub_download, snapshot_download
 
 ROOT = Path(os.environ["DATASETS_DIR"])
 
-# SCRAPE-IsaacLab redundancy study: stack_2_cubes at four trajectories-per-layout
-# levels, plus pickandplace per1. 10 fps, so101_follower, top + left_wrist @ 480x640.
+# SCRAPE-IsaacLab redundancy study, stack_2_cubes per5 and per10.
+# 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
 REPOS = [
-    "HyeonseokE/redundancy_stack_2_cubes_per1_ikaction_10fps",
-    "HyeonseokE/redundancy_stack_2_cubes_per3_ikaction_10fps",
     "HyeonseokE/redundancy_stack_2_cubes_per5_ikaction_10fps",
     "HyeonseokE/redundancy_stack_2_cubes_per10_ikaction_10fps",
-    "HyeonseokE/redundancy_pickandplace_per1_ikaction_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -183,11 +172,11 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 5 training runs (5 cells, seed ${SEED:-1000}) ==="
-JOBNAME="smolvla-rcm-s${SEED:-1000}"
+echo "=== [4/4] submit 2 training runs (per5, per10 @ 150 epochs, seed ${SEED:-1000}) ==="
+JOBNAME="smolvla-stack150-s${SEED:-1000}"
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING redundancy compute-matched training job(s) are already queued or running."
+  echo "FATAL: $RUNNING stack150 training job(s) are already queued or running."
   echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
   echo "       or submit just the missing runs with an explicit --array:"
   echo "         sbatch --array=<subset> cluster/train_redundancy_cm.sbatch"
@@ -202,12 +191,12 @@ fi
 # everything else. Export into this shell's environment and let --export=ALL carry it.
 # Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
 # point of this file existing separately from main_job_phase1.sbatch.
-export RCM_CELLS="${RCM_CELLS:-0,1,2,3,4}"
+export RCM_CELLS="5,6"
 export SEED="${SEED:-1000}"
-export PACK="${PACK:-3}"
+export PACK="${PACK:-1}"
 echo "=== cells=$RCM_CELLS  seed=$SEED  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
-echo "=== rcm-main done: $(date) ==="
+echo "=== stack150-main done: $(date) ==="

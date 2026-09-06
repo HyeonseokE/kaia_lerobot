@@ -5,8 +5,10 @@
 # so "more data" is separated from "more gradient steps". See
 # cluster/train_redundancy_cm_body.sh for why.
 #
-# Cells: 0-3 stack_2_cubes per1/per3/per5/per10 @ 29,100 steps
-#        4   pickandplace per1                @ 25,050 steps (RQ1 B budget)
+# Cells: 0-3 stack_2_cubes per1/per3/per5/per10 @ 29,100 steps  (compute-matched)
+#        4   pickandplace per1                @ 25,050 steps  (RQ1 B budget)
+#        5   stack_2_cubes per5               @ 42,000 steps  (150 epochs)
+#        6   stack_2_cubes per10              @ 87,300 steps  (150 epochs)
 #
 # The run list is one entry per cell at a single seed = 5 runs, and each array task takes
 # PACK of it, so --array=0-7 covers it with room to spare -- tasks past the end exit 0.
@@ -76,7 +78,7 @@ export SEED
 ALL=()
 for sd in "$SEED"; do
   for c in ${RCM_CELLS//,/ }; do
-    [ "$c" -ge 0 ] && [ "$c" -le 4 ] || { echo "FATAL: RCM_CELLS has '$c' (valid 0-4)."; exit 1; }
+    [ "$c" -ge 0 ] && [ "$c" -le 6 ] || { echo "FATAL: RCM_CELLS has '$c' (valid 0-6)."; exit 1; }
     ALL+=("${c}:${sd}")
   done
 done

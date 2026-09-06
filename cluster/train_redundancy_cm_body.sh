@@ -2,7 +2,7 @@
 # sourced by cluster/train_redundancy_cm.sbatch. No #SBATCH directives here: SLURM reads
 # those only from the submitted wrapper.
 #
-# The caller must set RCM_CELL (0-4) before sourcing.
+# The caller must set RCM_CELL (0-6) before sourcing.
 #
 # WHAT IS DIFFERENT FROM EVERY OTHER BODY IN THIS DIRECTORY
 #
@@ -15,6 +15,11 @@
 #   stack_2_cubes per5   17,940 frames -> 29,100 steps = 103.8 epochs
 #   stack_2_cubes per10  37,272 frames -> 29,100 steps =  50.0 epochs
 #   pickandplace  per1    3,350 frames -> 25,050 steps = 478.6 epochs
+#
+# Cells 5-6 are a separate, EPOCH-matched pair -- 150 epochs each on its own dataset:
+#
+#   stack_2_cubes per5   17,940 frames -> 42,000 steps = 150 epochs
+#   stack_2_cubes per10  37,272 frames -> 87,300 steps = 150 epochs
 #
 # The point is to separate "more data" from "more gradient steps". With epochs fixed, a
 # bigger dataset also gets more iterations, and the two explanations are confounded --
@@ -57,7 +62,8 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 #
 # REF_FRAMES="" means the budget is external (RQ1's) rather than derived here, so the
 # derivation check below is skipped for that cell.
-RCM_CELL="${RCM_CELL:?RCM_CELL not set (0-4). Source this from cluster/train_redundancy_cm.sbatch.}"
+REF_EPOCHS=""
+RCM_CELL="${RCM_CELL:?RCM_CELL not set (0-6). Source this from cluster/train_redundancy_cm.sbatch.}"
 
 case "$RCM_CELL" in
   0) TASKSET=stack_2_cubes; PER=per1;  FRAMES=3291;  STEPS=29100; REF_FRAMES=37272 ;;
@@ -65,13 +71,21 @@ case "$RCM_CELL" in
   2) TASKSET=stack_2_cubes; PER=per5;  FRAMES=17940; STEPS=29100; REF_FRAMES=37272 ;;
   3) TASKSET=stack_2_cubes; PER=per10; FRAMES=37272; STEPS=29100; REF_FRAMES=37272 ;;
   4) TASKSET=pickandplace;  PER=per1;  FRAMES=3350;  STEPS=25050; REF_FRAMES=""     ;;
-  *) echo "FATAL: bad RCM_CELL='$RCM_CELL' (expected 0-4)"; exit 1 ;;
+  5) TASKSET=stack_2_cubes; PER=per5;  FRAMES=17940; STEPS=42000; REF_FRAMES=17940; REF_EPOCHS=150 ;;
+  6) TASKSET=stack_2_cubes; PER=per10; FRAMES=37272; STEPS=87300; REF_FRAMES=37272; REF_EPOCHS=150 ;;
+  *) echo "FATAL: bad RCM_CELL='$RCM_CELL' (expected 0-6)"; exit 1 ;;
 esac
 
+# Cells 5 and 6 are NOT compute-matched: each trains 150 epochs on its own dataset, so
+# per10 gets more than twice per5's steps. They live here anyway because everything else
+# in this body -- explicit per-cell STEPS, the <steps>step name, the single seed -- is
+# what they need; only the budget's provenance differs, which REF_EPOCHS records.
+REF_EPOCHS="${REF_EPOCHS:-50}"
+
 if [ -n "$REF_FRAMES" ]; then
-  WANT_REF="$(awk -v f="$REF_FRAMES" 'BEGIN{ printf "%d", int(f/64) * 50 }')"
+  WANT_REF="$(awk -v f="$REF_FRAMES" -v e="$REF_EPOCHS" 'BEGIN{ printf "%d", int(f/64) * e }')"
   if [ "$WANT_REF" != "$STEPS" ]; then
-    echo "FATAL: REF_FRAMES=$REF_FRAMES gives $WANT_REF steps, but STEPS=$STEPS."
+    echo "FATAL: REF_FRAMES=$REF_FRAMES at $REF_EPOCHS epochs gives $WANT_REF steps, but STEPS=$STEPS."
     exit 1
   fi
 fi

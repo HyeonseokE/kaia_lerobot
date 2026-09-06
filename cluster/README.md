@@ -137,6 +137,21 @@ step 예산은 **데이터셋별이 아니라 그룹별**로 고정된다.
 | 3 | `..._stack_2_cubes_per10_...` | 37,272 | 29,100 | 50.0 |
 | 4 | `redundancy_pickandplace_per1_ikaction_10fps` | 3,350 | **25,050** | 478.6 |
 
+150 epoch 짝은 **별도 진입점**이다 — compute-matched 가 아니라 각자 자기 데이터셋 기준
+150 epoch 이라 per10 이 per5 의 두 배 넘게 돈다:
+
+```
+cluster/main_job_stack150.sbatch     ← 셀 5,6
+```
+
+| cell | dataset | frames | steps | epoch |
+|---|---|---|---|---|
+| 5 | `..._stack_2_cubes_per5_...` | 17,940 | 42,000 | 150 |
+| 6 | `..._stack_2_cubes_per10_...` | 37,272 | 87,300 | 150 |
+
+여기만 `PACK=1` 이 기본이다. 2런뿐이라 GPU 한 장씩 주면 긴 쪽(~7.7h)에 끝나지만,
+한 GPU 에 몰면 ~10h 이 된다.
+
 - `29,100` = `floor(37272/64)×50`, per10(그룹 최대)의 50 epoch
 - `25,050` = **RQ1 조건 B 가 돌린 값**. 이 값을 맞춰야 RQ1 기존 수치와도 비교된다
 
