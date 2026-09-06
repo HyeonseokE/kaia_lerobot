@@ -117,7 +117,47 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
-### C. SmolVLA — redundancy, compute-matched
+### C. SmolVLA — benchmark_table Ours arm (11 태스크 × 3 시드)
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_bench_ours.sbatch`** | **이것 하나만 던진다** |
+
+**array 태스크 하나 = 데이터셋 하나의 시드 3개.** 한 GPU 에 3개를 얹으므로, 태스크가
+끝나면 benchmark table 의 한 행이 통째로 완성된다 (세 행의 1/3 씩이 아니라).
+
+```
+array 0  stack_2_cubes    3  push_button     6  close_box        9  push_cube
+array 1  pick_place       4  extract_cube    7  turn_on_lever   10  pull_cube
+array 2  sort_by_color    5  open_box        8  turn_off_lever
+```
+
+앞 세 개가 우선순위다. 순서를 바꾸려면 `train_bench_ours.sbatch` 의 `TASKS=(...)` 만
+고치면 된다 — 순서가 사는 곳은 거기 하나다.
+
+**step 예산이 파일에 없다.** 데이터셋마다 스테이징한 사본에서 `floor(frames/64) × 50` 을
+런타임에 유도하고, 학습 전에 로그에 찍는다. 다른 잡들은 프레임 수를 박아두고 대조하지만
+이쪽은 그럴 수가 없다 — 다섯 개가 아직 수집 중이다. 대신 run dir 의 `.dataset_frames`
+스탬프가 데이터셋이 바뀐 뒤의 재실행을 계속 막는다.
+
+**없는 데이터셋은 실패가 아니라 건너뛴다.** prefetch 는 있는 것만 받고 없는 것은 알리며,
+해당 array 태스크는 안내만 남기고 `exit 0` 한다. 수집이 끝날 때마다 같은 파일을 다시
+던지면 된다 — 이미 끝난 런은 체크포인트를 이어받아 1분 만에 재 push 하고 넘어간다.
+
+2026-09-06 기준 6/11 이 준비됐다:
+
+| task | frames | steps | 시드 3개 소요 |
+|---|---|---|---|
+| stack_2_cubes | 37,889 | 29,600 | ~3.5h |
+| pick_place | 29,269 | 22,850 | ~2.7h |
+| sort_by_color | 74,952 | 58,550 | ~7.0h |
+| push_button | 11,380 | 8,850 | ~1.1h |
+| extract_cube | 31,555 | 24,650 | ~2.9h |
+| open_box | 29,116 | 22,700 | ~2.7h |
+
+모델 레포는 `smolvla_<task>_ours_<seed>_10fps` — CaP arm 과 같은 규칙의 `ours` 쪽이다.
+
+### ~~C. SmolVLA — redundancy, compute-matched~~ (폐기 2026-09-06)
 
 | # | 파일 | 비고 |
 |---|---|---|
@@ -127,73 +167,10 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 50 epoch 을 맞추지만, 이 실험은 **네 개가 모두 같은 29,100 step** 을 돈다 — per10(가장 큰
 셋)의 50 epoch 에 해당하는 값이다.
 
-step 예산은 **데이터셋별이 아니라 그룹별**로 고정된다.
-
-| cell | dataset | frames | steps | 실효 epoch |
-|---|---|---|---|---|
-| 0 | `redundancy_stack_2_cubes_per1_ikaction_10fps` | 3,291 | 29,100 | 565.9 |
-| 1 | `..._stack_2_cubes_per3_...` | 10,700 | 29,100 | 174.1 |
-| 2 | `..._stack_2_cubes_per5_...` | 17,940 | 29,100 | 103.8 |
-| 3 | `..._stack_2_cubes_per10_...` | 37,272 | 29,100 | 50.0 |
-| 4 | `redundancy_pickandplace_per1_ikaction_10fps` | 3,350 | **25,050** | 478.6 |
-
-150 epoch 짝은 **별도 진입점**이다 — compute-matched 가 아니라 각자 자기 데이터셋 기준
-150 epoch 이라 per10 이 per5 의 두 배 넘게 돈다:
-
-```
-cluster/main_job_stack150.sbatch     ← 셀 5,6
-```
-
-| cell | dataset | frames | steps | epoch |
-|---|---|---|---|---|
-| 5 | `..._stack_2_cubes_per5_...` | 17,940 | 42,000 | 150 |
-| 6 | `..._stack_2_cubes_per10_...` | 37,272 | 87,300 | 150 |
-
-**여기만 DDP 가 기본이다.** 학습 하나를 GPU 2장에 펼쳐서 순차로 돈다:
-
-```
-DDP    per5 ~1.9h → per10 ~3.9h      합 ~5.8h
-1GPU씩  per5 3.7h ∥ per10 7.7h        합 ~7.7h (per10 이 결정)
-```
-
-2런뿐이라 나란히 돌리면 짧은 쪽이 끝나고 GPU 한 장이 논다. `DDP=0` 이면 GPU당 1런.
-
-**실효 배치는 64로 유지된다.** lerobot 의 `--batch_size` 는 프로세스당 값이라
-(`lerobot_train.py:408`) 본체가 `DDP_PROCS` 로 나눠 rank 당 32 를 준다. 안 나누면 128 이
-되어 단일 GPU 런들과 비교가 깨진다.
-
-단, DistributedSampler 가 인덱스를 나누고 rank 마다 RNG 가 달라서 **DDP 런은 단일 GPU
-런과 bit-identical 하지 않다.** 비교할 집합은 한쪽 런처로 통일할 것.
-
-- `29,100` = `floor(37272/64)×50`, per10(그룹 최대)의 50 epoch
-- `25,050` = **RQ1 조건 B 가 돌린 값**. 이 값을 맞춰야 RQ1 기존 수치와도 비교된다
-
-epoch 을 고정하면 데이터가 큰 쪽이 gradient step 도 더 받아서 **"데이터가 많아서"와
-"iteration 이 많아서"가 섞인다.** step 을 고정하면 데이터만 다른 비교가 된다. RQ1 의
-compute-matched 대조군과 같은 논리이고, 모델 이름의 `_cm` 도 그 선례를 따른다.
-
-`--policy.scheduler_decay_steps` 도 29,100 으로 묶여 LR 스케줄까지 동일하다. 그래서
-epoch-matched 체크포인트에서 이어붙일 수 없다 — 항상 fresh run 이다.
-
-**시드는 하나만 돈다** (기본 1000). 이 실험은 고정 step 예산에서 데이터셋을 바꾸는 것이라
-시드가 스윕 축이 아니다. 5런, GPU 한 장에 3개씩 2태스크, ~7h.
-
-모델 이름은 이 계열에 이미 쓰이는 규칙을 따른다 (Hub 의
-`smolvla_pickandplace_per5_ikaction_10fps_13050step_s2000`):
-
-```
-smolvla_<taskset>_<per>_ikaction_10fps_<steps>step_s<seed>
-```
-
-**step 수가 이름에 들어간다.** 이 런들은 epoch 이 아니라 연산 예산으로 구분되므로,
-같은 데이터셋에 다른 예산을 한 번만 더 돌려도 이름이 없으면 구별이 안 된다.
-
-일부만, 혹은 다른 시드로:
-
-```
-RCM_CELLS=4 sbatch --export=ALL cluster/main_job_redundancy_cm.sbatch
-SEED=2000   sbatch --export=ALL cluster/main_job_redundancy_cm.sbatch
-```
+> **이 컨벤션은 폐기됐다.** 실험이 끝났고 결과 7건은 Hub 에 있다. 새 실험의 본으로 삼지
+> 말 것 — 그룹별 고정 step, 단일 시드, 이름의 `<steps>step` 은 전부 이 실험 전용이다.
+> 현재 컨벤션은 **50 epoch / batch 64 / 시드 1000·2000·3000** 이고 D 섹션을 따른다.
+> 파일은 재현을 위해 남겨두되 헤더에 RETIRED 를 명시했다.
 
 ### D. SmolVLA — benchmark_table CaP arm (4 태스크 × 3 시드)
 

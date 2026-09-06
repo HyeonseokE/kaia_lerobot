@@ -1,4 +1,16 @@
 #!/bin/bash
+# ============================================================================
+# RETIRED 2026-09-06. The compute-matched redundancy study is finished and its
+# convention is not the one to copy for new work:
+#
+#   - step budget fixed per group instead of derived per dataset
+#   - a single seed instead of 1000/2000/3000
+#   - <steps>step in the model name
+#
+# All seven runs are on the Hub. Kept so those runs can be reproduced; do not
+# base a new experiment on this file. The current convention is 50 epochs at
+# batch 64 across seeds 1000/2000/3000 -- see cluster/train_bench_ours_body.sh.
+# ============================================================================
 # SmolVLA on the redundancy per-N sets, COMPUTE-MATCHED -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole

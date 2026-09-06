@@ -1,0 +1,100 @@
+#!/bin/bash
+# SmolVLA on the benchmark-table OURS datasets -- array launcher.
+#
+# ONE ARRAY TASK = ONE DATASET AT ALL THREE SEEDS. The three runs are packed onto that
+# task's single GPU, so a task finishing means a task x seed cell of the benchmark table
+# is complete rather than a third of three cells being complete.
+#
+# Task order is priority order. stack_2_cubes, pick_place and sort_by_color come first
+# because they were asked for first; the rest follow, and the ones still being collected
+# are last:
+#
+#   array 0  stack_2_cubes     3  push_button      6  close_box       9  push_cube
+#   array 1  pick_place        4  extract_cube     7  turn_on_lever  10  pull_cube
+#   array 2  sort_by_color     5  open_box         8  turn_off_lever
+#
+# A task whose dataset is not in $HOME/datasets yet exits 0 with a note instead of
+# failing -- six of these were still being recorded when this was written. Rerun the job
+# once they land and only the missing ones do work; the finished ones resume their
+# completed checkpoints and re-push in about a minute each.
+#
+# THE STEP BUDGET IS NOT IN THIS FILE. It is derived per dataset at runtime as
+# floor(frames/64) * 50; see cluster/train_bench_ours_body.sh for why.
+#
+#SBATCH --job-name=smolvla-bench-ours
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:pro6000:1
+#SBATCH --cpus-per-task=12          # 3 workers x 3 packed runs, plus the main threads
+#SBATCH --mem=128G
+#SBATCH --time=1-00:00:00           # sort_by_color is ~5 h per seed, ~15 h for its three
+#SBATCH --array=0-10%2              # %2 = two GPUs at a time
+#SBATCH --output=slurm-bench-ours-%A_%a.out
+
+set -euo pipefail
+export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
+
+CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
+
+if [ "${AUTO_PULL:-1}" = "1" ] && [ -d "$CHECKOUT/.git" ]; then
+  echo "=== auto-pull $CHECKOUT (ff-only, flock-serialized) ==="
+  flock "$CHECKOUT/.git" apptainer exec docker://hyeonseoke/lerobot:v1 \
+    git -C "$CHECKOUT" pull --ff-only \
+    || { echo "FATAL: git pull failed (network, or checkout diverged). Fix, or set AUTO_PULL=0."; exit 1; }
+fi
+
+BODY="$CHECKOUT/cluster/train_bench_ours_body.sh"
+[ -f "$BODY" ] || { echo "FATAL: $BODY not found. Run cluster/main_job_bench_ours.sbatch first."; exit 1; }
+
+[ -n "${SLURM_ARRAY_TASK_ID:-}" ] || {
+  echo "FATAL: SLURM_ARRAY_TASK_ID unset -- the --array line was not honoured."
+  echo "       Resubmit, or run one task by hand: sbatch --array=0 cluster/train_bench_ours.sbatch"
+  exit 1
+}
+K="$SLURM_ARRAY_TASK_ID"
+
+# Priority order. Editing this reorders what runs first; it is the only place the order
+# lives.
+TASKS=(stack_2_cubes pick_place sort_by_color push_button extract_cube open_box \
+       close_box turn_on_lever turn_off_lever push_cube pull_cube)
+
+[ "$K" -ge 0 ] && [ "$K" -lt "${#TASKS[@]}" ] || {
+  echo "FATAL: array index $K out of range (0-$(( ${#TASKS[@]} - 1 )))."; exit 1; }
+TASK="${TASKS[$K]}"
+
+# Not collected yet -- say so and stop, rather than letting the body FATAL and marking
+# the array task failed. Rerunning the job later picks these up.
+if [ ! -f "$HOME/datasets/${TASK}_ours_10fps/meta/info.json" ]; then
+  echo "=== ${TASK}_ours_10fps is not in \$HOME/datasets yet; nothing to do for task $K ==="
+  echo "=== rerun cluster/main_job_bench_ours.sbatch once it is on the Hub ==="
+  exit 0
+fi
+
+SEEDS="${SEEDS:-1000 2000 3000}"
+export NUM_WORKERS="${NUM_WORKERS:-3}"
+export OURS_TASK="$TASK"
+
+echo "=== task $K -> $TASK, seeds [$SEEDS] on one GPU: $(date) on $(hostname) ==="
+nvidia-smi
+
+# Each seed is its own PROCESS, not sourced: the body cd's, takes a per-run lock and
+# installs an EXIT trap, so two of them in one shell would collide.
+pids=()
+for sd in $SEEDS; do
+  LOG="bench_ours_${TASK}_s${sd}.log"
+  echo "=== launching $TASK seed $sd -> $LOG ==="
+  OURS_TASK="$TASK" SEED="$sd" NUM_WORKERS="$NUM_WORKERS" bash "$BODY" > "$LOG" 2>&1 &
+  pids+=("$!")
+  sleep 30      # stagger: three simultaneous /tmp staging copies would fight over NFS
+done
+
+echo "=== ${#pids[@]} run(s) launched; watch the per-run .log files ==="
+
+# Fail the task if any seed fails, but only once all have finished. A `wait -n` early
+# exit would orphan the survivors and the job teardown would kill them mid-training.
+rc=0
+for p in "${pids[@]}"; do
+  wait "$p" || rc=1
+done
+
+echo "=== task $K ($TASK) done: $(date) (rc=$rc) ==="
+exit "$rc"

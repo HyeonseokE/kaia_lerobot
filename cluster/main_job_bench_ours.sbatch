@@ -1,17 +1,5 @@
 #!/bin/bash
-# ============================================================================
-# RETIRED 2026-09-06. The compute-matched redundancy study is finished and its
-# convention is not the one to copy for new work:
-#
-#   - step budget fixed per group instead of derived per dataset
-#   - a single seed instead of 1000/2000/3000
-#   - <steps>step in the model name
-#
-# All seven runs are on the Hub. Kept so those runs can be reproduced; do not
-# base a new experiment on this file. The current convention is 50 epochs at
-# batch 64 across seeds 1000/2000/3000 -- see cluster/train_bench_ours_body.sh.
-# ============================================================================
-# SmolVLA on stack_2_cubes per5/per10 at 150 EPOCHS -- SINGLE ENTRY POINT.
+# SmolVLA on the benchmark-table OURS datasets -- SINGLE ENTRY POINT.
 #
 #   OOD Job Composer -> New Job -> paste THIS FILE -> Submit.  That is the whole
 #   procedure. Nothing else in cluster/ needs to be submitted by hand.
@@ -19,8 +7,8 @@
 # This one job does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. prefetch   -- download the two datasets ONCE into $HOME/datasets/
-#   4. submit     -- queue the 2 training runs and exit
+#   3. prefetch   -- download whichever datasets exist ONCE into $HOME/datasets/
+#   4. submit     -- queue all 12 training runs and exit
 #
 # It never touches the GPU -- it only downloads and submits -- but it REQUESTS one
 # anyway. Without --gres this job sits in the queue forever with
@@ -29,38 +17,55 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the jobs this one queues: 2 runs at ONE seed.
+# The GPU work proper happens in the jobs this one queues: 11 tasks x 3 seeds, with one
+# array task per dataset carrying all three of its seeds on one GPU. A finished array
+# task therefore means a finished benchmark-table row, not a third of three rows.
 #
-#   stack_2_cubes per5   17,940 frames -> 42,000 steps = 150 epochs  (~3.7 h)
-#   stack_2_cubes per10  37,272 frames -> 87,300 steps = 150 epochs  (~7.7 h)
+# Priority order, first three as asked:
 #
-# EPOCH-matched, not compute-matched: each trains 150 epochs on its own dataset, so
-# per10 gets more than twice per5's steps. These are cells 5 and 6 of the shared table
-# in cluster/train_redundancy_cm_body.sh; the compute-matched cells (0-4) are a separate
-# submission, cluster/main_job_redundancy_cm.sbatch.
+#   0 stack_2_cubes   3 push_button    6 close_box        9 push_cube
+#   1 pick_place      4 extract_cube   7 turn_on_lever   10 pull_cube
+#   2 sort_by_color   5 open_box       8 turn_off_lever
 #
-# DDP by default: each run is spread over both GPUs rather than getting one to itself.
-# With two runs and two GPUs that is faster -- per5 ~1.9 h then per10 ~3.9 h, about
-# 5.8 h, against 7.7 h if they ran side by side and the pair waited on per10.
-# Effective batch stays 64 (32 per rank), so the step counts mean what they say.
-# Submit with DDP=0 to fall back to one run per GPU.
+# THE STEP BUDGET IS DERIVED AT RUNTIME. Five of these datasets were still being
+# recorded when this was written, so there is no frame count to hardcode. Each run
+# computes floor(frames/64) * 50 from the copy it stages and prints it before training.
+# The other jobs in this directory hardcode and verify; this one cannot, and
+# cluster/train_bench_ours_body.sh says what that trades away.
 #
-# SEED picks the seed (1000 by default) and rides in both the model name -- the step
-# count is in there too, so these do not collide with the 29,100-step runs on the same
-# datasets -- and the job name.
+# MISSING DATASETS ARE SKIPPED, NOT FAILED. Prefetch downloads what exists and reports
+# what does not; array tasks for absent datasets exit 0 with a note. Rerun this file as
+# collections land -- finished runs resume their completed checkpoints and re-push in
+# about a minute each, so only the new work costs anything.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
-# Step 4 refuses to run if a job for THIS seed is already queued, so a resubmit will
-# not create duplicates.
+# Step 4 refuses to run if bench-cap jobs are already queued, so a resubmit will not
+# create duplicates.
 #
-#SBATCH --job-name=stack150-main
+# All three seeds go in one submission -- no SEED env var to set. The seed lands in the
+# model repo name (smolvla_<task>_cap_<seed>_10fps, straight from benchmark_table's
+# README), so the 12 runs never collide.
+#
+# To run a subset instead, submit cluster/train_bench_ours.sbatch directly with an
+# explicit --array (its header has the index table).
+#
+# The three seeds of a dataset share one GPU. On a pro6000 that measured 0.43 s/step
+# against 0.318 solo -- three runs for 1.35x the time, so packing wins clearly here.
+# The flip side is shared fate: if one seed dies, the array task takes the other two
+# with it, and with save_freq == steps there is nothing to resume.
+#
+# This is the CaP arm. It is NOT cluster/main_job.sbatch, which trains four other
+# *_cap_10fps datasets for 300 epochs at batch 32 under the name smolvla_<ds>_300ep --
+# a separate one-off, not a benchmark-table cell.
+#
+#SBATCH --job-name=bench-ours-main
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1        # never used -- see above
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=06:00:00
-#SBATCH --output=slurm-stack150-main-%j.out
+#SBATCH --output=slurm-bench-ours-main-%j.out
 
 set -euo pipefail
 
@@ -68,7 +73,7 @@ set -euo pipefail
 # "$HOME" are both undefined and `set -u` kills the script on first use.
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export USER="${USER:-$(id -un)}"
-echo "=== stack150-main start: $(date) on $(hostname) ==="
+echo "=== bench-ours-main start: $(date) on $(hostname) ==="
 echo "HOME=$HOME USER=$USER"
 
 IMAGE="docker://hyeonseoke/lerobot:v1"   # explicit tag -- :latest would serve a stale cached SIF
@@ -101,18 +106,12 @@ else
 fi
 echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --abbrev-ref HEAD) @ $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse --short HEAD) ==="
 
-# There is only one launcher here; PACK controls how many runs share a GPU (3 by
-# default, PACK=1 for one per GPU).
-# DDP by default here: two runs, two GPUs, so spreading one training over both finishes
-# the pair sooner than giving each its own GPU (~5.8 h vs ~7.7 h). DDP=0 for the
-# one-GPU-per-run launcher.
-if [ "${DDP:-1}" = "1" ]; then
-  TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm_ddp.sbatch"
-else
-  TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm.sbatch"
-fi
-echo "=== $( [ "${DDP:-1}" = 1 ] && echo "DDP: 1 run across 2 GPUs" || echo "1 run per GPU" ) ==="
-for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_redundancy_cm_body.sh"; do
+# Packed by DEFAULT: two runs per GPU, so at the launcher's %2 that is 2 GPUs x 2
+# trainings = 4 in parallel and the 12 runs clear in three waves. PACKED=0 falls back to
+# one run per GPU (six waves).
+# One launcher: each array task carries a dataset's three seeds on one GPU.
+TRAIN_JOB="$CHECKOUT/cluster/train_bench_ours.sbatch"
+for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_bench_ours_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
 
@@ -138,25 +137,47 @@ from huggingface_hub import hf_hub_download, snapshot_download
 
 ROOT = Path(os.environ["DATASETS_DIR"])
 
-# SCRAPE-IsaacLab redundancy study, stack_2_cubes per5 and per10.
-# 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
+# SCRAPE-IsaacLab benchmark_table, Ours arm. 10 fps, so101_follower, cameras
+# top + left_wrist @ 480x640. Datasets not yet on the Hub are skipped.
 REPOS = [
-    "HyeonseokE/redundancy_stack_2_cubes_per5_ikaction_10fps",
-    "HyeonseokE/redundancy_stack_2_cubes_per10_ikaction_10fps",
+    # priority order, same as the launcher's array
+    "HyeonseokE/stack_2_cubes_ours_10fps",
+    "HyeonseokE/pick_place_ours_10fps",
+    "HyeonseokE/sort_by_color_ours_10fps",
+    "HyeonseokE/push_button_ours_10fps",
+    "HyeonseokE/extract_cube_ours_10fps",
+    "HyeonseokE/open_box_ours_10fps",
+    # still being collected as of 2026-09-06 -- skipped until they appear
+    "HyeonseokE/close_box_ours_10fps",
+    "HyeonseokE/turn_on_lever_ours_10fps",
+    "HyeonseokE/turn_off_lever_ours_10fps",
+    "HyeonseokE/push_cube_ours_10fps",
+    "HyeonseokE/pull_cube_ours_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
-# alone is not enough -- pick_place_A1 went from 30,749 to 31,744 frames after its
-# SCRAPE-box script was written, and nothing announced it.
+# alone is not enough -- phase1_pick_place_A1 went from 30,749 to 31,744 frames after a
+# script was written against it, and nothing announced the change.
+# Returns None when the repo does not exist yet. Several of these are still being
+# recorded, and a 404 has to be a skip rather than a failure -- otherwise the whole
+# submission waits on the slowest collection.
 def hub_info(repo):
-    p = hf_hub_download(repo_id=repo, repo_type="dataset", revision="main",
-                        filename="meta/info.json", force_download=True)
+    try:
+        p = hf_hub_download(repo_id=repo, repo_type="dataset", revision="main",
+                            filename="meta/info.json", force_download=True)
+    except Exception as e:
+        print(f"[wait] {repo} not on the Hub yet ({type(e).__name__}) -- skipping", flush=True)
+        return None
     d = json.loads(Path(p).read_text())
     return d["total_episodes"], d["total_frames"]
 
+PRESENT = []
 for repo in REPOS:
     dst = ROOT / repo.split("/")[-1]
     want = hub_info(repo)
+    if want is None:
+        continue
+    PRESENT.append(repo)
 
     if (dst / "meta" / "info.json").exists():
         have = json.loads((dst / "meta" / "info.json").read_text())
@@ -174,51 +195,39 @@ for repo in REPOS:
 
 # Verify each dataset loads the way training will, and print the step budget the body
 # will derive. The body recomputes this itself and refuses to train on a mismatch --
-# an off-by-two-epoch cell is not comparable to the other Phase-1 cells.
+# an off-by-two-epoch cell is not comparable to the other benchmark cells.
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
-for repo in REPOS:
+for repo in PRESENT:
     d = ROOT / repo.split("/")[-1]
     ds = LeRobotDataset(repo, root=str(d))
     item = ds[len(ds) // 2]
     cams = sorted(k for k in item if k.startswith("observation.images"))
-    steps = (ds.num_frames // 64) * 50          # phase1 convention: floor per epoch, x50
+    steps = (ds.num_frames // 64) * 50          # what the run will derive for itself
     print(f"[ok  ] {repo}: episodes={ds.num_episodes} frames={ds.num_frames} "
-          f"cams={cams} -> {steps} steps = {steps*64/ds.num_frames:.1f} epochs", flush=True)
+          f"cams={cams} -> 50 epochs = {steps} steps", flush=True)
 
-print("PREFETCH ALL OK", flush=True)
+print(f"PREFETCH OK -- {len(PRESENT)}/{len(REPOS)} datasets available", flush=True)
 PY
 
 # ------------------------------------------------------------------ 4. submit
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit 2 training runs (per5, per10 @ 150 epochs, seed ${SEED:-1000}) ==="
-JOBNAME="smolvla-stack150-s${SEED:-1000}"
+echo "=== [4/4] submit training array (tasks x seeds 1000/2000/3000) ==="
+JOBNAME="smolvla-bench-ours"     # the packed launcher's name starts with this too
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING stack150 training job(s) are already queued or running."
+  echo "FATAL: $RUNNING bench-ours training job(s) are already queued or running."
   echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
   echo "       or submit just the missing runs with an explicit --array:"
-  echo "         sbatch --array=<subset> cluster/train_redundancy_cm.sbatch"
+  echo "         sbatch --array=4-11 cluster/train_bench_ours.sbatch"
   squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E "JOBID|${JOBNAME}"
   exit 1
 fi
 
-# NOT --export=ALL,RCM_CELLS=0,1,2,3,4 -- sbatch splits --export on commas, and
-# SLURM offers no escape for a comma inside a value. On 2026-08-29 that turned
-# a comma-separated list into its first element plus junk assignments, so the array
-# trained cell 0 at three seeds and reported "past the end of the 3-run list" for
-# everything else. Export into this shell's environment and let --export=ALL carry it.
-# Fixed to the two _via4cm cells. Nothing to edit at submit time -- that is the
-# point of this file existing separately from main_job_phase1.sbatch.
-export RCM_CELLS="5,6"
-export SEED="${SEED:-1000}"
-export PACK="${PACK:-1}"
-export DDP_PROCS="${DDP_PROCS:-2}"
-echo "=== cells=$RCM_CELLS  seed=$SEED  pack=$PACK ==="
-sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
+sbatch --job-name="$JOBNAME" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'
-echo "=== stack150-main done: $(date) ==="
+echo "=== bench-ours-main done: $(date) ==="
