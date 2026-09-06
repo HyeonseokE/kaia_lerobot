@@ -149,8 +149,21 @@ cluster/main_job_stack150.sbatch     ← 셀 5,6
 | 5 | `..._stack_2_cubes_per5_...` | 17,940 | 42,000 | 150 |
 | 6 | `..._stack_2_cubes_per10_...` | 37,272 | 87,300 | 150 |
 
-여기만 `PACK=1` 이 기본이다. 2런뿐이라 GPU 한 장씩 주면 긴 쪽(~7.7h)에 끝나지만,
-한 GPU 에 몰면 ~10h 이 된다.
+**여기만 DDP 가 기본이다.** 학습 하나를 GPU 2장에 펼쳐서 순차로 돈다:
+
+```
+DDP    per5 ~1.9h → per10 ~3.9h      합 ~5.8h
+1GPU씩  per5 3.7h ∥ per10 7.7h        합 ~7.7h (per10 이 결정)
+```
+
+2런뿐이라 나란히 돌리면 짧은 쪽이 끝나고 GPU 한 장이 논다. `DDP=0` 이면 GPU당 1런.
+
+**실효 배치는 64로 유지된다.** lerobot 의 `--batch_size` 는 프로세스당 값이라
+(`lerobot_train.py:408`) 본체가 `DDP_PROCS` 로 나눠 rank 당 32 를 준다. 안 나누면 128 이
+되어 단일 GPU 런들과 비교가 깨진다.
+
+단, DistributedSampler 가 인덱스를 나누고 rank 마다 RNG 가 달라서 **DDP 런은 단일 GPU
+런과 bit-identical 하지 않다.** 비교할 집합은 한쪽 런처로 통일할 것.
 
 - `29,100` = `floor(37272/64)×50`, per10(그룹 최대)의 50 epoch
 - `25,050` = **RQ1 조건 B 가 돌린 값**. 이 값을 맞춰야 RQ1 기존 수치와도 비교된다

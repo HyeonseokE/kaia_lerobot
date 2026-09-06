@@ -113,6 +113,35 @@ esac
 # second budget is tried on the same dataset -- which is exactly what this study does.
 NAME="smolvla_${TASKSET}_${PER}_ikaction_10fps_${STEPS}step_s${SEED}"
 
+# Dataloader workers. The launcher exports this; the default here is the fallback when
+# the body is run directly.
+NUM_WORKERS="${NUM_WORKERS:-8}"
+
+# ---------------------------------------------------------------------------- DDP
+# DDP_PROCS > 1 runs ONE training across that many GPUs via accelerate.
+#
+# EFFECTIVE BATCH IS HELD AT 64. lerobot's --batch_size is PER PROCESS
+# (lerobot_train.py:408 computes effective_bs = batch_size * num_processes), so 2 GPUs
+# take 32 each. SmolVLA has no BatchNorm -- only LayerNorm -- so 2x32 with gradient
+# averaging is equivalent in expectation to 1x64, and a step means the same thing in
+# both. Without this division the run would silently train at batch 128.
+#
+# The data order still differs from a single-GPU run: DistributedSampler partitions the
+# indices and each rank draws its own RNG stream, so a DDP run is not bit-identical to
+# its single-GPU twin. Keep any set you intend to compare on one launcher or the other.
+DDP_PROCS="${DDP_PROCS:-1}"
+case "$DDP_PROCS" in
+  ""|*[!0-9]*) echo "FATAL: DDP_PROCS='$DDP_PROCS' is not a number."; exit 1 ;;
+esac
+[ "$DDP_PROCS" -ge 1 ] || { echo "FATAL: DDP_PROCS must be >= 1."; exit 1; }
+EFFECTIVE_BS=64
+if [ $(( EFFECTIVE_BS % DDP_PROCS )) -ne 0 ]; then
+  echo "FATAL: effective batch $EFFECTIVE_BS is not divisible by DDP_PROCS=$DDP_PROCS."
+  exit 1
+fi
+BATCH_PER_PROC=$(( EFFECTIVE_BS / DDP_PROCS ))
+
+
 # Final checkpoint only, matching the other SCRAPE training scripts.
 #
 # lerobot_train.py computes  is_saving_step = step % save_freq == 0 or step == steps,
@@ -312,8 +341,20 @@ fi
 #
 # These repo names are new; nothing is overwritten on a first run. Re-running a cell at
 # the same seed does replace it.
+# accelerate launch needs a module, not the console script -- lerobot-train maps to
+# lerobot.scripts.lerobot_train:main (pyproject.toml:350). --mixed_precision is left
+# off on purpose: lerobot_train.py:217 builds its own Accelerator and derives it from
+# policy.dtype, and that explicit argument wins over the launcher default.
+if [ "$DDP_PROCS" -gt 1 ]; then
+  LAUNCH=(accelerate launch --num_machines=1 --num_processes="$DDP_PROCS"
+          -m lerobot.scripts.lerobot_train)
+  echo "=== DDP: $DDP_PROCS processes x batch $BATCH_PER_PROC = effective $EFFECTIVE_BS ==="
+else
+  LAUNCH=(lerobot-train)
+fi
+
 apptainer exec --nv "$IMAGE" \
-  lerobot-train \
+  "${LAUNCH[@]}" \
     "${POLICY_ARGS[@]}" \
     --dataset.repo_id="$DATASET" \
     --dataset.root="$DS_ROOT" \
@@ -326,7 +367,7 @@ apptainer exec --nv "$IMAGE" \
     --output_dir="$RUN_DIR/out" \
     --job_name="$NAME" \
     --seed="$SEED" \
-    --batch_size=64 \
+    --batch_size="$BATCH_PER_PROC" \
     --steps="$STEPS" \
     --policy.scheduler_decay_steps="$STEPS" \
     --save_freq="$SAVE_FREQ" \

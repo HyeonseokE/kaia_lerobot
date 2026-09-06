@@ -27,9 +27,11 @@
 # in cluster/train_redundancy_cm_body.sh; the compute-matched cells (0-4) are a separate
 # submission, cluster/main_job_redundancy_cm.sbatch.
 #
-# PACK=1 by default here, unlike the compute-matched job: with only two runs, giving
-# each its own GPU finishes the pair in the time of the longer one (~7.7 h) instead of
-# ~10 h sharing one.
+# DDP by default: each run is spread over both GPUs rather than getting one to itself.
+# With two runs and two GPUs that is faster -- per5 ~1.9 h then per10 ~3.9 h, about
+# 5.8 h, against 7.7 h if they ran side by side and the pair waited on per10.
+# Effective batch stays 64 (32 per rank), so the step counts mean what they say.
+# Submit with DDP=0 to fall back to one run per GPU.
 #
 # SEED picks the seed (1000 by default) and rides in both the model name -- the step
 # count is in there too, so these do not collide with the 29,100-step runs on the same
@@ -89,8 +91,15 @@ echo "=== $CHECKOUT is at $(apptainer exec "$IMAGE" git -C "$CHECKOUT" rev-parse
 
 # There is only one launcher here; PACK controls how many runs share a GPU (3 by
 # default, PACK=1 for one per GPU).
-TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm.sbatch"
-echo "=== ${PACK:-1} run(s) per GPU ==="
+# DDP by default here: two runs, two GPUs, so spreading one training over both finishes
+# the pair sooner than giving each its own GPU (~5.8 h vs ~7.7 h). DDP=0 for the
+# one-GPU-per-run launcher.
+if [ "${DDP:-1}" = "1" ]; then
+  TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm_ddp.sbatch"
+else
+  TRAIN_JOB="$CHECKOUT/cluster/train_redundancy_cm.sbatch"
+fi
+echo "=== $( [ "${DDP:-1}" = 1 ] && echo "DDP: 1 run across 2 GPUs" || echo "1 run per GPU" ) ==="
 for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_redundancy_cm_body.sh"; do
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
@@ -194,6 +203,7 @@ fi
 export RCM_CELLS="5,6"
 export SEED="${SEED:-1000}"
 export PACK="${PACK:-1}"
+export DDP_PROCS="${DDP_PROCS:-2}"
 echo "=== cells=$RCM_CELLS  seed=$SEED  pack=$PACK ==="
 sbatch --job-name="$JOBNAME" --export=ALL "$TRAIN_JOB"
 
