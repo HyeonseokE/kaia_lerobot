@@ -3,7 +3,7 @@
 #
 # ONE ARRAY TASK = ONE DATASET AT ALL THREE SEEDS (1000/2000/3000). The three runs are
 # packed onto that
-# task's single GPU -- 8 dataloader workers each -- so a task finishing means a whole
+# task's single GPU -- 4 dataloader workers each -- so a task finishing means a whole
 # benchmark-table row is complete rather than a third of three rows.
 #
 # Never more than two GPUs: --array=...%2 caps concurrent tasks at two and each task
@@ -28,12 +28,14 @@
 #SBATCH --job-name=smolvla-bench-ours
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=27          # 8 workers x 3 packed runs, plus the main threads
-                                    # At %2 that is 54 of the node's 64 CPUs. It fits
-                                    # when the partition is otherwise idle; if another
-                                    # job holds CPUs these tasks wait on Resources
-                                    # even with GPUs free. That happened on 2026-08-29.
-                                    # Lower NUM_WORKERS if that starts costing time.
+#SBATCH --cpus-per-task=15          # 4 workers x 3 packed runs, plus the main threads
+                                    # At %2 that is 30 of the node's 64 CPUs, leaving
+                                    # room for other jobs. It was 27 (8 workers) and
+                                    # that is what CPU-starved the queue: 60 of 64 CPUs
+                                    # were held and a third task could not start with
+                                    # GPUs free. Costs nothing to lower -- data_s runs
+                                    # ~0.02 s against updt_s ~0.43, so the loader idles
+                                    # most of every step.
 #SBATCH --mem=128G
 #SBATCH --time=1-00:00:00           # longest task is sort_by_color at ~7 h
 #SBATCH --array=0-10%2              # %2 = never more than two GPUs, one per task
@@ -79,7 +81,7 @@ if [ ! -f "$HOME/datasets/${TASK}_ours_10fps/meta/info.json" ]; then
 fi
 
 SEEDS="${SEEDS:-1000 2000 3000}"
-export NUM_WORKERS="${NUM_WORKERS:-8}"   # per training session
+export NUM_WORKERS="${NUM_WORKERS:-4}"   # per training session
 export OURS_TASK="$TASK"
 
 echo "=== task $K -> $TASK, seeds [$SEEDS] on one GPU: $(date) on $(hostname) ==="
