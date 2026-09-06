@@ -123,8 +123,16 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 |---|---|---|
 | 1 | **`main_job_bench_ours.sbatch`** | **이것 하나만 던진다** |
 
-**array 태스크 하나 = 데이터셋 하나의 시드 3개.** 한 GPU 에 3개를 얹으므로, 태스크가
-끝나면 benchmark table 의 한 행이 통째로 완성된다 (세 행의 1/3 씩이 아니라).
+**array 태스크 하나 = 데이터셋 하나의 시드 3개(1000/2000/3000).** 한 GPU 에 3개를 얹고
+학습 세션마다 `num_workers=8` 을 준다. 태스크가 끝나면 benchmark table 의 한 행이
+통째로 완성된다 (세 행의 1/3 씩이 아니라).
+
+**GPU 는 절대 2장을 넘지 않는다** — `--array=0-10%2` 가 동시 태스크를 2개로 묶고 태스크당
+`--gres=gpu:pro6000:1` 이다.
+
+`--cpus-per-task=27` (8×3 + 메인 스레드). `%2` 면 노드 64 CPU 중 54 를 쓴다. 파티션이
+비어 있으면 들어가지만, 다른 잡이 CPU 를 물고 있으면 **GPU 가 남아도 `Resources` 로
+대기한다** (2026-08-29 에 겪은 증상). 그때는 `NUM_WORKERS` 를 낮추면 된다.
 
 ```
 array 0  stack_2_cubes    3  push_button     6  close_box        9  push_cube

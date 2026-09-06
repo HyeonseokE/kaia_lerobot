@@ -1,9 +1,13 @@
 #!/bin/bash
 # SmolVLA on the benchmark-table OURS datasets -- array launcher.
 #
-# ONE ARRAY TASK = ONE DATASET AT ALL THREE SEEDS. The three runs are packed onto that
-# task's single GPU, so a task finishing means a task x seed cell of the benchmark table
-# is complete rather than a third of three cells being complete.
+# ONE ARRAY TASK = ONE DATASET AT ALL THREE SEEDS (1000/2000/3000). The three runs are
+# packed onto that
+# task's single GPU -- 8 dataloader workers each -- so a task finishing means a whole
+# benchmark-table row is complete rather than a third of three rows.
+#
+# Never more than two GPUs: --array=...%2 caps concurrent tasks at two and each task
+# requests exactly one GPU.
 #
 # Task order is priority order. stack_2_cubes, pick_place and sort_by_color come first
 # because they were asked for first; the rest follow, and the ones still being collected
@@ -24,10 +28,15 @@
 #SBATCH --job-name=smolvla-bench-ours
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=12          # 3 workers x 3 packed runs, plus the main threads
+#SBATCH --cpus-per-task=27          # 8 workers x 3 packed runs, plus the main threads
+                                    # At %2 that is 54 of the node's 64 CPUs. It fits
+                                    # when the partition is otherwise idle; if another
+                                    # job holds CPUs these tasks wait on Resources
+                                    # even with GPUs free. That happened on 2026-08-29.
+                                    # Lower NUM_WORKERS if that starts costing time.
 #SBATCH --mem=128G
-#SBATCH --time=1-00:00:00           # sort_by_color is ~5 h per seed, ~15 h for its three
-#SBATCH --array=0-10%2              # %2 = two GPUs at a time
+#SBATCH --time=1-00:00:00           # longest task is sort_by_color at ~7 h
+#SBATCH --array=0-10%2              # %2 = never more than two GPUs, one per task
 #SBATCH --output=slurm-bench-ours-%A_%a.out
 
 set -euo pipefail
@@ -70,7 +79,7 @@ if [ ! -f "$HOME/datasets/${TASK}_ours_10fps/meta/info.json" ]; then
 fi
 
 SEEDS="${SEEDS:-1000 2000 3000}"
-export NUM_WORKERS="${NUM_WORKERS:-3}"
+export NUM_WORKERS="${NUM_WORKERS:-8}"   # per training session
 export OURS_TASK="$TASK"
 
 echo "=== task $K -> $TASK, seeds [$SEEDS] on one GPU: $(date) on $(hostname) ==="
