@@ -117,6 +117,32 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
+### C0. SmolVLA — 빠진 8개 셀 채우기 (일회성)
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_gapfill.sbatch`** | **이것 하나만 던진다** |
+
+arm 런처는 한 태스크의 시드를 전부 돌린다. 여기 빠진 건 임의의 (태스크, arm, 시드)
+조합 8개라 전용 잡을 따로 뒀다.
+
+```
+lane 0  ours sort_by_color s1000 → ablation sort_by_color s1000 → ours close_box s2000
+lane 1  ours sort_by_color s2000 → ours pick_place s1000 → s2000 → ours close_box s1000
+        → ours turn_on_lever s1000
+```
+
+282,150 step = **24.9 GPU-h**. LPT(긴 것부터 가벼운 레인에)로 138,750 / 143,400 으로
+갈라 레인 간 차이가 1.6% 다. **makespan ~12.7h**, 이론 하한 12.5h — 8개 중 셋이 ~58K
+step 이고 쪼갤 수 없어 둘은 반드시 한 레인을 공유하므로 더 빠른 배치는 없다.
+
+여덟 중 일곱은 Ours arm, 하나(`ablation_sort_by_color_100_10fps`)는 CaP/A0 베이스라인이라
+이름 규칙이 다르다. 런처가 arm 별로 본체를 갈라 호출한다.
+
+**`PACK=1` 이 기본이다.** 3개 패킹이 2026-09-07 에 `updt_s 0.94` — 3.19 step/s 로 단독
+3.14 와 같아 이득이 0이었다. 패킹의 "하나 죽으면 다 죽는" 위험만 남으므로 켜지 않는다.
+2-way 수치를 재보고 싶으면 `PACK=2` 로 던지면 된다.
+
 ### C. SmolVLA — benchmark_table Ours arm (11 태스크 × 3 시드)
 
 | # | 파일 | 비고 |
