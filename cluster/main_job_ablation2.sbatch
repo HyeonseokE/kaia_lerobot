@@ -17,30 +17,35 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the array this one queues: 6 datasets
-# (A2/A3 x turn_off_lever/extract_cube/stack_2_cubes) at SEED 1000 = 6 runs, ONE RUN PER
-# GPU, two at a time.
+# The GPU work proper happens in the array this one queues: the ablation2 B arm at
+# seed 1000, ONE RUN PER GPU, two at a time. Nine cells in priority order -- collected
+# first, still-being-recorded last:
 #
-#   A2  turn_off_lever  21,418 frames -> 16,700 steps      A3  21,595 -> 16,850
-#   A2  extract_cube    31,296 frames -> 24,450 steps      A3  31,711 -> 24,750
-#   A2  stack_2_cubes   38,853 frames -> 30,350 steps      A3  37,922 -> 29,600
+#   0  B1 turn_off_lever  21,699 frames -> 16,950 steps    collected
+#   1  B1 extract_cube    31,573 frames -> 24,650 steps    collected
+#   2  B1 stack_2_cubes   37,664 frames -> 29,400 steps    collected
+#   3  B2 turn_off_lever  21,734 frames -> 16,950 steps    collected
+#   4  B2 extract_cube    31,509 frames -> 24,600 steps    collected
+#   5  B3 turn_off_lever  21,919 frames -> 17,100 steps    collected
+#   6  B2 stack_2_cubes                                    still collecting
+#   7  B3 extract_cube                                     still collecting
+#   8  B3 stack_2_cubes                                    still collecting
 #
-# 142,700 steps = ~12.6 GPU-hours at 0.318 s/step, so ~6.3 h across two GPUs.
+# 129,650 steps across the six collected = ~11.5 GPU-hours, ~5.7 h on two GPUs.
 #
-# ONE SEED. The convention is three per cell (mean +/- std over runs); this covers
-# seed 1000 only, as asked. The other two are a wider --array away -- see
-# cluster/train_ablation2.sbatch.
+# CHAINING THE REST IS A RERUN. Indices 6-8 exit 0 with a note while their datasets are
+# absent, so submitting today costs nothing for them. Submit this file again as each
+# collection lands: the six finished runs resume their completed checkpoints and re-push
+# in about a minute each, and only the newly available one does real work.
 #
 # NOT PACKED. Three runs sharing a pro6000 measured 0.94 s/step on 2026-09-07 -- 3.19
-# step/s against 3.14 solo, no gain once both GPUs were busy. With nothing to win,
-# packing would only add the risk that one failure takes its neighbours with it.
+# step/s against 3.14 solo, no gain once both GPUs were busy.
 #
-# A1 is not on the Hub yet. It is skipped rather than failed; add it to CONDS in
-# cluster/train_ablation2.sbatch and widen --array when it lands.
+# THE STEP BUDGET IS DERIVED AT RUNTIME from each staged copy, so the three unfinished
+# collections need no number here.
 #
-# THE STEP BUDGET IS DERIVED AT RUNTIME from each staged copy, same as the Ours arm --
-# these datasets are still arriving condition by condition and the numbers above are
-# today's, not a contract.
+# The A2/A3 set finished 2026-09-14; cluster/train_ablation2.sbatch shows the override
+# that re-runs it.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -141,16 +146,17 @@ ROOT = Path(os.environ["DATASETS_DIR"])
 # SCRAPE-IsaacLab ablation2. 10 fps, so101_follower, cameras top + left_wrist @ 480x640.
 # Conditions not yet on the Hub are skipped.
 REPOS = [
-    # A1 is not published yet; a 404 here is a skip, not a failure.
-    "HyeonseokE/ablation2_turn_off_lever_A1_10fps",
-    "HyeonseokE/ablation2_extract_cube_A1_10fps",
-    "HyeonseokE/ablation2_stack_2_cubes_A1_10fps",
-    "HyeonseokE/ablation2_turn_off_lever_A2_10fps",
-    "HyeonseokE/ablation2_extract_cube_A2_10fps",
-    "HyeonseokE/ablation2_stack_2_cubes_A2_10fps",
-    "HyeonseokE/ablation2_turn_off_lever_A3_10fps",
-    "HyeonseokE/ablation2_extract_cube_A3_10fps",
-    "HyeonseokE/ablation2_stack_2_cubes_A3_10fps",
+    # collected
+    "HyeonseokE/ablation2_turn_off_lever_B1_10fps",
+    "HyeonseokE/ablation2_extract_cube_B1_10fps",
+    "HyeonseokE/ablation2_stack_2_cubes_B1_10fps",
+    "HyeonseokE/ablation2_turn_off_lever_B2_10fps",
+    "HyeonseokE/ablation2_extract_cube_B2_10fps",
+    "HyeonseokE/ablation2_turn_off_lever_B3_10fps",
+    # still being recorded as of 2026-09-14 -- a 404 here is a skip, not a failure
+    "HyeonseokE/ablation2_stack_2_cubes_B2_10fps",
+    "HyeonseokE/ablation2_extract_cube_B3_10fps",
+    "HyeonseokE/ablation2_stack_2_cubes_B3_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -212,7 +218,7 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit ablation2 array (6 datasets, seed 1000) ==="
+echo "=== [4/4] submit ablation2 B arm (9 cells, seed 1000) ==="
 JOBNAME="smolvla-ablation2"     # the packed launcher's name starts with this too
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then

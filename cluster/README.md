@@ -117,47 +117,47 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
-### C1. SmolVLA — ablation2 (A2·A3 × 3 태스크 × 3 시드)
+### C1. SmolVLA — ablation2
 
 | # | 파일 | 비고 |
 |---|---|---|
 | 1 | **`main_job_ablation2.sbatch`** | **이것 하나만 던진다** |
 
-**array 태스크 하나 = 런 하나.** 패킹하지 않는다 — 3개 패킹이 2026-09-07 에
-`updt_s 0.94` (3.19 step/s, 단독 3.14) 로 이득이 0이었다. 얻을 게 없으면 "하나 죽으면
-이웃도 죽는" 위험만 남는다.
+**array 태스크 하나 = 런 하나**, 패킹하지 않는다 — 3개 패킹이 2026-09-07 에
+`updt_s 0.94` (3.19 step/s, 단독 3.14) 로 이득이 0이었다.
 
-| 조건 | task | frames | steps |
-|---|---|---|---|
-| A2 | turn_off_lever | 21,418 | 16,700 |
-| A2 | extract_cube | 31,296 | 24,450 |
-| A2 | stack_2_cubes | 38,853 | 30,350 |
-| A3 | turn_off_lever | 21,595 | 16,850 |
-| A3 | extract_cube | 31,711 | 24,750 |
-| A3 | stack_2_cubes | 37,922 | 29,600 |
+런처는 `cond:task` **순서 목록**을 받는다. 순서가 곧 우선순위이고, 수집 완료된 것을
+앞에, 수집 중인 것을 뒤에 둔다.
 
-**기본은 시드 1000 하나**, 6런이다. 142,700 step = 12.6 GPU-h → GPU 2장 **≈6.3h**.
-최장 단일 런이 2.7h 라 walltime 12h 로 충분하다.
+**현재 기본 = B arm, 시드 1000 (9셀)**
+
+| array | 조건 | task | frames | steps | 상태 |
+|---|---|---|---|---|---|
+| 0 | B1 | turn_off_lever | 21,699 | 16,950 | 수집 완료 |
+| 1 | B1 | extract_cube | 31,573 | 24,650 | 수집 완료 |
+| 2 | B1 | stack_2_cubes | 37,664 | 29,400 | 수집 완료 |
+| 3 | B2 | turn_off_lever | 21,734 | 16,950 | 수집 완료 |
+| 4 | B2 | extract_cube | 31,509 | 24,600 | 수집 완료 |
+| 5 | B3 | turn_off_lever | 21,919 | 17,100 | 수집 완료 |
+| 6 | B2 | stack_2_cubes | — | — | 수집 중 |
+| 7 | B3 | extract_cube | — | — | 수집 중 |
+| 8 | B3 | stack_2_cubes | — | — | 수집 중 |
+
+수집 완료 6개 = 129,650 step = 11.5 GPU-h → GPU 2장 **≈5.7h**.
+
+**체이닝은 재제출이다.** 인덱스 6-8 은 데이터셋이 없는 동안 안내만 남기고 `exit 0`
+하므로 오늘 던져도 비용이 0이다. 수집이 끝날 때마다 같은 파일을 다시 던지면 — 끝난 6런은
+체크포인트를 이어받아 1분 만에 재 push 하고, 새로 생긴 것만 실제로 학습한다.
+
+**A2/A3 (2026-09-14 완료)** 를 다시 돌리려면:
 
 ```
-array 0  A2 turn_off_lever    3  A3 turn_off_lever
-array 1  A2 extract_cube      4  A3 extract_cube
-array 2  A2 stack_2_cubes     5  A3 stack_2_cubes
+A2_CELLS="A2:turn_off_lever A2:extract_cube A2:stack_2_cubes A3:turn_off_lever A3:extract_cube A3:stack_2_cubes" \
+  sbatch --array=0-5%2 cluster/train_ablation2.sbatch
 ```
 
-컨벤션은 셀당 시드 3개(mean±std)이고 이건 그 1/3 이다. 나머지 두 시드를 돌리려면:
-
-```
-A2_SEEDS="1000 2000 3000" sbatch --array=0-17%2 cluster/train_ablation2.sbatch
-```
-→ 18런, 428,100 step = 37.8 GPU-h, GPU 2장 ≈19h.
-
-인덱스에서 시드가 가장 빨리 변하므로, 시드 목록과 `--array` 를 같이 넓히면 한 셀의
-시드가 연속으로 묶이고 `0-5` 의 의미도 그대로 유지된다.
-
-**A1 은 아직 Hub 에 없다.** 404 를 실패가 아니라 스킵으로 처리한다. 올라오면
-`train_ablation2.sbatch` 의 `CONDS=(A2 A3)` 에 A1 을 넣고 `--array` 를 `0-26` 으로
-넓히면 된다.
+시드 3개로 넓히려면 `A2_SEEDS="1000 2000 3000"` + `--array` 확대. 인덱스에서 시드가 가장
+빨리 변하므로 한 셀의 시드가 연속으로 묶인다.
 
 모델 레포는 `smolvla_ablation2_<task>_<조건>_<seed>_10fps`.
 
