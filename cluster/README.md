@@ -117,6 +117,37 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 > 죽는다 — 잘못된 epoch 으로 학습된 셀은 형제 셀과 비교 불가고 로그에는 아무 표시도
 > 안 남기 때문이다. 이 FATAL 이 뜨면 case 블록의 숫자를 갱신할 것.
 
+### C1. SmolVLA — ablation2 (A2·A3 × 3 태스크 × 3 시드)
+
+| # | 파일 | 비고 |
+|---|---|---|
+| 1 | **`main_job_ablation2.sbatch`** | **이것 하나만 던진다** |
+
+**array 태스크 하나 = 런 하나.** 패킹하지 않는다 — 3개 패킹이 2026-09-07 에
+`updt_s 0.94` (3.19 step/s, 단독 3.14) 로 이득이 0이었다. 얻을 게 없으면 "하나 죽으면
+이웃도 죽는" 위험만 남는다.
+
+| 조건 | task | frames | steps |
+|---|---|---|---|
+| A2 | turn_off_lever | 21,418 | 16,700 |
+| A2 | extract_cube | 31,296 | 24,450 |
+| A2 | stack_2_cubes | 38,853 | 30,350 |
+| A3 | turn_off_lever | 21,595 | 16,850 |
+| A3 | extract_cube | 31,711 | 24,750 |
+| A3 | stack_2_cubes | 37,922 | 29,600 |
+
+6 데이터셋 × 3 시드 = **18런**, 428,100 step = 37.8 GPU-h → GPU 2장 **≈19h**.
+최장 단일 런이 2.7h 라 walltime 12h 로 충분하다.
+
+인덱스는 **한 셀의 시드 3개가 연속**이도록 배치했다 (`0-2` A2 turn_off_lever,
+`3-5` A2 extract_cube, …). 중간에 멈춰도 셀 단위로 완성돼 mean±std 를 낼 수 있다.
+
+**A1 은 아직 Hub 에 없다.** 404 를 실패가 아니라 스킵으로 처리한다. 올라오면
+`train_ablation2.sbatch` 의 `CONDS=(A2 A3)` 에 A1 을 넣고 `--array` 를 `0-26` 으로
+넓히면 된다.
+
+모델 레포는 `smolvla_ablation2_<task>_<조건>_<seed>_10fps`.
+
 ### C0. SmolVLA — 빠진 8개 셀 채우기 (일회성)
 
 | # | 파일 | 비고 |
