@@ -136,11 +136,24 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 | A3 | extract_cube | 31,711 | 24,750 |
 | A3 | stack_2_cubes | 37,922 | 29,600 |
 
-6 데이터셋 × 3 시드 = **18런**, 428,100 step = 37.8 GPU-h → GPU 2장 **≈19h**.
+**기본은 시드 1000 하나**, 6런이다. 142,700 step = 12.6 GPU-h → GPU 2장 **≈6.3h**.
 최장 단일 런이 2.7h 라 walltime 12h 로 충분하다.
 
-인덱스는 **한 셀의 시드 3개가 연속**이도록 배치했다 (`0-2` A2 turn_off_lever,
-`3-5` A2 extract_cube, …). 중간에 멈춰도 셀 단위로 완성돼 mean±std 를 낼 수 있다.
+```
+array 0  A2 turn_off_lever    3  A3 turn_off_lever
+array 1  A2 extract_cube      4  A3 extract_cube
+array 2  A2 stack_2_cubes     5  A3 stack_2_cubes
+```
+
+컨벤션은 셀당 시드 3개(mean±std)이고 이건 그 1/3 이다. 나머지 두 시드를 돌리려면:
+
+```
+A2_SEEDS="1000 2000 3000" sbatch --array=0-17%2 cluster/train_ablation2.sbatch
+```
+→ 18런, 428,100 step = 37.8 GPU-h, GPU 2장 ≈19h.
+
+인덱스에서 시드가 가장 빨리 변하므로, 시드 목록과 `--array` 를 같이 넓히면 한 셀의
+시드가 연속으로 묶이고 `0-5` 의 의미도 그대로 유지된다.
 
 **A1 은 아직 Hub 에 없다.** 404 를 실패가 아니라 스킵으로 처리한다. 올라오면
 `train_ablation2.sbatch` 의 `CONDS=(A2 A3)` 에 A1 을 넣고 `--array` 를 `0-26` 으로

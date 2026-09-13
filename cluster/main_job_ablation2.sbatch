@@ -18,21 +18,22 @@
 # 0-GPU job never qualifies for them. Keep the line.
 #
 # The GPU work proper happens in the array this one queues: 6 datasets
-# (A2/A3 x turn_off_lever/extract_cube/stack_2_cubes) x 3 seeds = 18 runs, ONE RUN PER
+# (A2/A3 x turn_off_lever/extract_cube/stack_2_cubes) at SEED 1000 = 6 runs, ONE RUN PER
 # GPU, two at a time.
 #
 #   A2  turn_off_lever  21,418 frames -> 16,700 steps      A3  21,595 -> 16,850
 #   A2  extract_cube    31,296 frames -> 24,450 steps      A3  31,711 -> 24,750
 #   A2  stack_2_cubes   38,853 frames -> 30,350 steps      A3  37,922 -> 29,600
 #
-# 428,100 steps = ~37.8 GPU-hours at 0.318 s/step, so ~19 h across two GPUs.
+# 142,700 steps = ~12.6 GPU-hours at 0.318 s/step, so ~6.3 h across two GPUs.
+#
+# ONE SEED. The convention is three per cell (mean +/- std over runs); this covers
+# seed 1000 only, as asked. The other two are a wider --array away -- see
+# cluster/train_ablation2.sbatch.
 #
 # NOT PACKED. Three runs sharing a pro6000 measured 0.94 s/step on 2026-09-07 -- 3.19
 # step/s against 3.14 solo, no gain once both GPUs were busy. With nothing to win,
 # packing would only add the risk that one failure takes its neighbours with it.
-#
-# Array indices group a cell's three seeds together, so stopping early leaves whole
-# cells rather than three half-done ones.
 #
 # A1 is not on the Hub yet. It is skipped rather than failed; add it to CONDS in
 # cluster/train_ablation2.sbatch and widen --array when it lands.
@@ -211,7 +212,7 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit ablation2 array (6 datasets x seeds 1000/2000/3000) ==="
+echo "=== [4/4] submit ablation2 array (6 datasets, seed 1000) ==="
 JOBNAME="smolvla-ablation2"     # the packed launcher's name starts with this too
 RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
 if [ "$RUNNING" -gt 0 ]; then

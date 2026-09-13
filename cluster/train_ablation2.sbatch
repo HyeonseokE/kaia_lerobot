@@ -6,15 +6,21 @@
 # 3.14 solo -- the whole gain gone once both GPUs were busy. With no throughput to win,
 # packing would only add the risk that one failure takes its neighbours down.
 #
-#   6 datasets (A2/A3 x turn_off_lever/extract_cube/stack_2_cubes) x 3 seeds = 18 runs
+#   6 datasets (A2/A3 x turn_off_lever/extract_cube/stack_2_cubes) x 1 seed = 6 runs
 #
-# Indices are grouped so a cell's three seeds are consecutive. Stopping early then
-# leaves whole cells finished rather than three cells each missing a seed, which is what
-# a mean +/- std over seeds needs.
+#   0  A2 turn_off_lever    3  A3 turn_off_lever
+#   1  A2 extract_cube      4  A3 extract_cube
+#   2  A2 stack_2_cubes     5  A3 stack_2_cubes
 #
-#   0-2   A2 turn_off_lever      9-11  A3 turn_off_lever
-#   3-5   A2 extract_cube       12-14  A3 extract_cube
-#   6-8   A2 stack_2_cubes      15-17  A3 stack_2_cubes
+# ONE SEED (1000) by default. The house convention is three seeds per cell reported as
+# mean +/- std, and this covers a third of that -- deliberately, as asked. For the full
+# grid:
+#
+#   A2_SEEDS="1000 2000 3000" sbatch --array=0-17%2 cluster/train_ablation2.sbatch
+#
+# Seed varies fastest in the index, so widening the seed list and the --array range
+# together keeps a cell's seeds consecutive and leaves indices 0-5 meaning what they
+# mean now.
 #
 # A1 is absent on purpose -- it was not on the Hub when this was written. Add it to
 # CONDS once it lands and widen --array to 0-26.
@@ -28,7 +34,8 @@
 #SBATCH --cpus-per-task=10          # 8 workers for the one run, plus the main thread
 #SBATCH --mem=64G                   # one run holds ~14.4 GB of VRAM and far less host
 #SBATCH --time=12:00:00             # longest run is stack_2_cubes at ~30K steps, ~2.7 h
-#SBATCH --array=0-17%2              # %2 = never more than two GPUs, one per run
+#SBATCH --array=0-5%2               # 6 runs at one seed; widen to 0-17 for three seeds
+                                    # %2 = never more than two GPUs, one per run
 #SBATCH --output=slurm-ablation2-%A_%a.out
 
 set -euo pipefail
@@ -55,7 +62,7 @@ IDX="$SLURM_ARRAY_TASK_ID"
 
 CONDS=(A2 A3)
 TASKS=(turn_off_lever extract_cube stack_2_cubes)
-SEEDS=(1000 2000 3000)
+SEEDS=("${A2_SEEDS:-1000}")   # one seed by default; A2_SEEDS="1000 2000 3000" for the grid
 
 # Index layout: seed varies fastest, then task, then condition -- which is what puts a
 # cell's three seeds next to each other.
