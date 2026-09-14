@@ -12,9 +12,9 @@
 # resubmitting them would only collide with the per-run lock. Use
 # cluster/main_job_pipeline.sbatch instead if rank still needs running.
 #
-# Each stage is submitted with --dependency=afterany on the one before it, so stage 2
-# starts when stage 1 has fully finished and stage 3 when stage 2 has. afterany rather
-# than afterok: one failed cell should not strand everything behind it.
+# Stage 3 is submitted with --dependency=afterany on stage 2, so it starts when stage 2
+# has fully finished. afterany rather than afterok: one failed cell should not strand
+# everything behind it. Stage 2 itself has no dependency.
 #
 # FOUR TRAININGS AT A TIME. Every stage runs --array=...%2 (two GPUs, never more) with
 # PACK=2 runs sharing each GPU. Two SmolVLA runs hold ~29 GB of a 96 GB pro6000, and
