@@ -1,9 +1,12 @@
 #!/bin/bash
 # SmolVLA on the rq2 datasets -- array launcher.
 #
-# ONE ARRAY TASK = ONE RUN (task x arm x seed), one GPU each. Not packed: three runs
-# sharing a pro6000 measured 0.94 s/step on 2026-09-07, i.e. 3.19 step/s against 3.14
-# solo -- no throughput to win, only the risk that one failure takes its neighbours.
+# ONE ARRAY TASK = PACK RUNS ON ONE GPU (default 2). At %2 that is four trainings
+# across two GPUs.
+#
+# Packing three measured 0.94 s/step on 2026-09-07 -- 3.19 step/s against 3.14 solo,
+# no gain with the node busy -- while two has not been measured here. Two is the
+# middle setting; the first log lines settle it against that 0.94.
 #
 # CELLS is an ORDERED arm:episodes:task list. Order is priority order -- collected
 # first, still-being-recorded last. Five arms x three tasks = 15 cells:
@@ -26,10 +29,11 @@
 #SBATCH --job-name=smolvla-rq2
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
-#SBATCH --cpus-per-task=10          # 8 workers for the one run, plus the main thread
-#SBATCH --mem=64G
+#SBATCH --cpus-per-task=18          # 8 workers x PACK=2, plus the main threads
+#SBATCH --mem=128G                  # two runs on this GPU
 #SBATCH --time=12:00:00             # longest collected run is ~27,850 steps, ~2.5 h
-#SBATCH --array=0-14%2              # %2 = never more than two GPUs, one per run
+#SBATCH --array=0-8%2               # 15 cells / PACK=2 = 8 tasks; %2 = two GPUs
+                                    # 2 GPUs x PACK 2 = four trainings in parallel
 #SBATCH --output=slurm-rq2-%A_%a.out
 
 set -euo pipefail
@@ -72,14 +76,46 @@ SEEDS=(${RQ2_SEEDS:-1000})   # one seed by default; RQ2_SEEDS="1000 2000 3000" f
 N=$(( ${#CELLS[@]} * ${#SEEDS[@]} ))
 [ "$IDX" -ge 0 ] && [ "$IDX" -lt "$N" ] || { echo "FATAL: array index $IDX out of range (0-$(( N - 1 )))."; exit 1; }
 
-SEED="${SEEDS[$(( IDX % ${#SEEDS[@]} ))]}"
-CELL="${CELLS[$(( IDX / ${#SEEDS[@]} ))]}"
-ARM="${CELL%%:*}"
-TASK="${CELL##*:}"
-EP="${CELL#*:}"; EP="${EP%%:*}"
-
-export RQ2_TASK="$TASK" RQ2_ARM="$ARM" RQ2_EP="$EP" SEED
+# PACK cells share this task's GPU. Two SmolVLA runs hold ~29 GB of a 96 GB pro6000,
+# and at %2 that is four trainings across two GPUs.
+PACK="${PACK:-2}"
 export NUM_WORKERS="${NUM_WORKERS:-8}"
 
-echo "=== index $IDX -> $ARM / $TASK / ${EP}ep / seed $SEED: $(date) on $(hostname) ==="
-source "$BODY"
+ALL=()
+for sd in "${SEEDS[@]}"; do
+  for c in "${CELLS[@]}"; do ALL+=("$c|$sd"); done
+done
+
+MINE=()
+for j in $(seq 0 $(( PACK - 1 ))); do
+  n=$(( IDX * PACK + j ))
+  [ "$n" -lt "${#ALL[@]}" ] && MINE+=("${ALL[$n]}")
+done
+if [ "${#MINE[@]}" -eq 0 ]; then
+  echo "=== task $IDX is past the end of the ${#ALL[@]}-run list; nothing to do ==="
+  exit 0
+fi
+
+echo "=== task $IDX -> ${MINE[*]} (PACK=$PACK, $NUM_WORKERS workers each) ==="
+nvidia-smi
+
+rc=0
+pids=()
+for spec in "${MINE[@]}"; do
+  CELL="${spec%|*}"; SEED="${spec#*|}"
+  ARM="${CELL%%:*}"; TASK="${CELL##*:}"
+  EP="${CELL#*:}"; EP="${EP%%:*}"
+  LOG="rq2_${ARM}_${TASK}_s${SEED}.log"
+  echo "=== launching $ARM / $TASK / ${EP}ep seed $SEED -> $LOG ==="
+  ( RQ2_ARM="$ARM" RQ2_TASK="$TASK" RQ2_EP="$EP" SEED="$SEED" \
+    NUM_WORKERS="$NUM_WORKERS" bash "$BODY" ) > "$LOG" 2>&1 &
+  pids+=("$!")
+  sleep 30
+done
+
+for p in "${pids[@]}"; do
+  wait "$p" || rc=1
+done
+
+echo "=== task $IDX done: $(date) (rc=$rc) ==="
+exit "$rc"
