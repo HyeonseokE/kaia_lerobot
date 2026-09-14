@@ -30,7 +30,15 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:pro6000:1
 #SBATCH --cpus-per-task=18          # 8 workers x PACK=2, plus the main threads
-#SBATCH --mem=128G                  # two runs on this GPU
+#SBATCH --mem=96G                   # two runs on this GPU
+                                    # Was 128G and that is what stalled the queue on
+                                    # 2026-09-15: a GPU and 22 CPUs were free, and the
+                                    # second array task still sat at Reason: Resources
+                                    # because 128G was not. One of these runs completed
+                                    # fine under --mem=64G when PACK was 1, so 48G a run
+                                    # has margin; the towel OOM that set the old ceiling
+                                    # was 12 workers over 3 cameras on a 205K-step run,
+                                    # not 8 over 2 on a 30K one.
 #SBATCH --time=12:00:00             # longest collected run is ~27,850 steps, ~2.5 h
 #SBATCH --array=0-8%2               # 15 cells / PACK=2 = 8 tasks; %2 = two GPUs
                                     # 2 GPUs x PACK 2 = four trainings in parallel
