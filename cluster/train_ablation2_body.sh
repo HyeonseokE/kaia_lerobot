@@ -45,11 +45,18 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 # The task name comes from the launcher. There is no cell table because there are no
 # hardcoded frame counts to keep in one -- see the header.
 TASK="${A2_TASK:?A2_TASK not set. Source this from cluster/train_ablation2.sbatch.}"
-COND="${A2_COND:?A2_COND not set (A1/A2/A3).}"
+COND="${A2_COND:?A2_COND not set (A2/A3/B1/B2/B3/rank).}"
 EPOCHS="${EPOCHS:-50}"
 
 HUB_USER=HyeonseokE
-DS="ablation2_${TASK}_${COND}_10fps"
+# The rank arm has no condition field in its names -- ablation2_rank_<task>_10fps, not
+# ablation2_<task>_<cond>_10fps -- so COND=rank selects that shape instead of being
+# substituted into the usual one.
+if [ "$COND" = "rank" ]; then
+  DS="ablation2_rank_${TASK}_10fps"
+else
+  DS="ablation2_${TASK}_${COND}_10fps"
+fi
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 
@@ -75,7 +82,11 @@ case "$SEED" in
   1000|2000|3000) ;;
   *) echo "FATAL: SEED='$SEED' -- benchmark_table requires 1000, 2000 or 3000."; exit 1 ;;
 esac
-NAME="smolvla_ablation2_${TASK}_${COND}_${SEED}_10fps"
+if [ "$COND" = "rank" ]; then
+  NAME="smolvla_ablation2_rank_${TASK}_${SEED}_10fps"
+else
+  NAME="smolvla_ablation2_${TASK}_${COND}_${SEED}_10fps"
+fi
 
 DS_SRC="$HOME/datasets/$DS"
 [ -f "$DS_SRC/meta/info.json" ] || { echo "FATAL: $DS_SRC not found. Run cluster/main_job_ablation2.sbatch first."; exit 1; }

@@ -10,18 +10,23 @@
 #   priority order -- collected datasets first, ones still being recorded last -- so a
 #   submission does the available work now and the rest falls to a later rerun.
 #
-#   default (B arm, 2026-09-14):
-#     0  B1 turn_off_lever   16,950     collected
-#     1  B1 extract_cube     24,650     collected
-#     2  B1 stack_2_cubes    29,400     collected
-#     3  B2 turn_off_lever   16,950     collected
-#     4  B2 extract_cube     24,600     collected
-#     5  B3 turn_off_lever   17,100     collected
-#     6  B2 stack_2_cubes        --     still collecting
-#     7  B3 extract_cube         --     still collecting
-#     8  B3 stack_2_cubes        --     still collecting
+#   default (2026-09-14, what the B-arm job left undone):
+#     0  B2 stack_2_cubes     30,200     collected
+#     1  B3 extract_cube      26,000     collected
+#     2  B3 stack_2_cubes     30,450     collected
+#     3  rank turn_off_lever  16,900     collected
+#     4  rank extract_cube        --     still collecting
+#     5  rank stack_2_cubes       --     still collecting (83/100)
 #
-#   129,650 steps across the six collected = ~11.5 GPU-hours, ~5.7 h on two GPUs.
+#   COND=rank is a shape, not a condition: that arm is named
+#   ablation2_rank_<task>_10fps with no condition field, and the body handles it.
+#
+#   The six B cells the earlier submission covers (B1 x3, B2 turn_off_lever,
+#   B2 extract_cube, B3 turn_off_lever) are NOT in this list on purpose -- running them
+#   again while that job holds them would just trip the per-run lock. Bring them back
+#   with A2_CELLS if that job dies.
+#
+#   103,550 steps across the four collected = ~9.1 GPU-hours, ~4.6 h on two GPUs.
 #
 #   A dataset that is not in $HOME/datasets exits 0 with a note instead of failing, so
 #   indices 6-8 cost nothing today. RERUN cluster/main_job_ablation2.sbatch as each
@@ -41,7 +46,7 @@
 #SBATCH --cpus-per-task=10          # 8 workers for the one run, plus the main thread
 #SBATCH --mem=64G                   # one run holds ~14.4 GB of VRAM and far less host
 #SBATCH --time=12:00:00             # longest run is stack_2_cubes at ~30K steps, ~2.7 h
-#SBATCH --array=0-8%2               # 9 cells at one seed; widen for more seeds
+#SBATCH --array=0-5%2               # 6 cells at one seed; widen for more seeds
                                     # %2 = never more than two GPUs, one per run
 #SBATCH --output=slurm-ablation2-%A_%a.out
 
@@ -69,9 +74,9 @@ IDX="$SLURM_ARRAY_TASK_ID"
 
 # Ordered cond:task list. Editing this is how you change what runs and in what order;
 # there is no cross-product to reason about.
-CELLS=(${A2_CELLS:-B1:turn_off_lever B1:extract_cube B1:stack_2_cubes \
-                   B2:turn_off_lever B2:extract_cube B3:turn_off_lever \
-                   B2:stack_2_cubes B3:extract_cube B3:stack_2_cubes})
+CELLS=(${A2_CELLS:-B2:stack_2_cubes B3:extract_cube B3:stack_2_cubes \
+                   rank:turn_off_lever \
+                   rank:extract_cube rank:stack_2_cubes})
 SEEDS=(${A2_SEEDS:-1000})   # one seed by default; A2_SEEDS="1000 2000 3000" for the grid
 
 # Seed varies fastest, so widening the seed list keeps a cell's seeds consecutive and

@@ -17,35 +17,32 @@
 # because the gpu partition's nodes are reserved for higher-priority GPU work and a
 # 0-GPU job never qualifies for them. Keep the line.
 #
-# The GPU work proper happens in the array this one queues: the ablation2 B arm at
-# seed 1000, ONE RUN PER GPU, two at a time. Nine cells in priority order -- collected
+# The GPU work proper happens in the array this one queues: what the B-arm submission
+# left undone, at seed 1000, ONE RUN PER GPU, two at a time. Priority order -- collected
 # first, still-being-recorded last:
 #
-#   0  B1 turn_off_lever  21,699 frames -> 16,950 steps    collected
-#   1  B1 extract_cube    31,573 frames -> 24,650 steps    collected
-#   2  B1 stack_2_cubes   37,664 frames -> 29,400 steps    collected
-#   3  B2 turn_off_lever  21,734 frames -> 16,950 steps    collected
-#   4  B2 extract_cube    31,509 frames -> 24,600 steps    collected
-#   5  B3 turn_off_lever  21,919 frames -> 17,100 steps    collected
-#   6  B2 stack_2_cubes                                    still collecting
-#   7  B3 extract_cube                                     still collecting
-#   8  B3 stack_2_cubes                                    still collecting
+#   0  B2 stack_2_cubes    38,682 frames -> 30,200 steps    collected
+#   1  B3 extract_cube     33,296 frames -> 26,000 steps    collected
+#   2  B3 stack_2_cubes    38,979 frames -> 30,450 steps    collected
+#   3  rank turn_off_lever 21,644 frames -> 16,900 steps    collected
+#   4  rank extract_cube                                    still collecting
+#   5  rank stack_2_cubes                                   still collecting (83/100)
 #
-# 129,650 steps across the six collected = ~11.5 GPU-hours, ~5.7 h on two GPUs.
+# 103,550 steps across the four collected = ~9.1 GPU-hours, ~4.6 h on two GPUs.
 #
-# CHAINING THE REST IS A RERUN. Indices 6-8 exit 0 with a note while their datasets are
-# absent, so submitting today costs nothing for them. Submit this file again as each
-# collection lands: the six finished runs resume their completed checkpoints and re-push
-# in about a minute each, and only the newly available one does real work.
+# IT CHAINS. If a smolvla-ablation2 job is already queued or running, this one is
+# submitted with --dependency=afterany on it and starts the moment that finishes. No job
+# id to look up by hand. CHAIN=0 skips the dependency.
+#
+# The rank arm is named ablation2_rank_<task>_10fps, with no condition field; COND=rank
+# selects that shape in the body rather than being substituted into the usual one.
+#
+# CHAINING THE LAST TWO IS A RERUN. Indices 4-5 exit 0 with a note while their datasets
+# are absent. Submit this file again once they land -- finished runs resume their
+# completed checkpoints and re-push in about a minute, and only the new one trains.
 #
 # NOT PACKED. Three runs sharing a pro6000 measured 0.94 s/step on 2026-09-07 -- 3.19
 # step/s against 3.14 solo, no gain once both GPUs were busy.
-#
-# THE STEP BUDGET IS DERIVED AT RUNTIME from each staged copy, so the three unfinished
-# collections need no number here.
-#
-# The A2/A3 set finished 2026-09-14; cluster/train_ablation2.sbatch shows the override
-# that re-runs it.
 #
 # Steps 1-3 are all idempotent, so resubmitting this after a failure is safe: the git
 # sync fast-forwards, and the prefetch skips any dataset that already matches the Hub.
@@ -147,16 +144,13 @@ ROOT = Path(os.environ["DATASETS_DIR"])
 # Conditions not yet on the Hub are skipped.
 REPOS = [
     # collected
-    "HyeonseokE/ablation2_turn_off_lever_B1_10fps",
-    "HyeonseokE/ablation2_extract_cube_B1_10fps",
-    "HyeonseokE/ablation2_stack_2_cubes_B1_10fps",
-    "HyeonseokE/ablation2_turn_off_lever_B2_10fps",
-    "HyeonseokE/ablation2_extract_cube_B2_10fps",
-    "HyeonseokE/ablation2_turn_off_lever_B3_10fps",
-    # still being recorded as of 2026-09-14 -- a 404 here is a skip, not a failure
     "HyeonseokE/ablation2_stack_2_cubes_B2_10fps",
     "HyeonseokE/ablation2_extract_cube_B3_10fps",
     "HyeonseokE/ablation2_stack_2_cubes_B3_10fps",
+    "HyeonseokE/ablation2_rank_turn_off_lever_10fps",
+    # still being recorded as of 2026-09-14 -- a 404 here is a skip, not a failure
+    "HyeonseokE/ablation2_rank_extract_cube_10fps",
+    "HyeonseokE/ablation2_rank_stack_2_cubes_10fps",
 ]
 
 # A local copy is only reused if it matches what the Hub currently serves. Presence
@@ -218,19 +212,30 @@ PY
 # Refuse to queue a second set. Resubmitting this file after a partial failure is meant
 # to be safe, and it only is if this step does not stack duplicate training jobs on top
 # of the ones already waiting.
-echo "=== [4/4] submit ablation2 B arm (9 cells, seed 1000) ==="
-JOBNAME="smolvla-ablation2"     # the packed launcher's name starts with this too
-RUNNING="$(squeue -h -u "$USER" -o '%j' 2>/dev/null | grep -c "^${JOBNAME}" || true)"
-if [ "$RUNNING" -gt 0 ]; then
-  echo "FATAL: $RUNNING ablation2 training job(s) are already queued or running."
-  echo "       Refusing to submit duplicates. Cancel them first if you meant to restart,"
-  echo "       or submit just the missing runs with an explicit --array:"
-  echo "         sbatch --array=4-11 cluster/train_ablation2.sbatch"
-  squeue -u "$USER" -o '%.10i %.24j %.10T %.12M' | grep -E "JOBID|${JOBNAME}"
-  exit 1
+echo "=== [4/4] submit ablation2 leftovers + rank (6 cells, seed 1000) ==="
+JOBNAME="smolvla-ablation2"
+
+# CHAIN ONTO WHATEVER IS ALREADY RUNNING, rather than refusing.
+#
+# The other entry points treat an existing same-named job as a duplicate and stop. Here
+# that is wrong: this submission is the NEXT batch of cells, and what is wanted is for it
+# to start the moment the current one is done. %F gives the array job id (one line per
+# task, hence sort -u), and afterany rather than afterok so a single failed cell in the
+# previous batch does not strand this one.
+#
+# CHAIN=0 submits immediately instead -- only sensible if you know the GPUs are free.
+DEPEND=()
+if [ "${CHAIN:-1}" = "1" ]; then
+  PREV="$(squeue -h -u "$USER" -n "$JOBNAME" -o '%F' 2>/dev/null | sort -u | tr '\n' ':' | sed 's/:$//')"
+  if [ -n "$PREV" ]; then
+    echo "=== chaining after job(s) $PREV (afterany) ==="
+    DEPEND=(--dependency="afterany:$PREV")
+  else
+    echo "=== nothing of this name in the queue; starting as soon as resources allow ==="
+  fi
 fi
 
-sbatch --job-name="$JOBNAME" "$TRAIN_JOB"
+sbatch "${DEPEND[@]+"${DEPEND[@]}"}" --job-name="$JOBNAME" "$TRAIN_JOB"
 
 echo
 squeue -u "$USER" -o '%.10i %.24j %.10T %.10M %.20E'

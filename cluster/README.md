@@ -129,25 +129,30 @@ sbatch --export=ALL,PHASE1_CELLS=0,1,3 cluster/main_job_phase1.sbatch
 런처는 `cond:task` **순서 목록**을 받는다. 순서가 곧 우선순위이고, 수집 완료된 것을
 앞에, 수집 중인 것을 뒤에 둔다.
 
-**현재 기본 = B arm, 시드 1000 (9셀)**
+**현재 기본 = B arm 잔여 + rank, 시드 1000 (6셀)**
 
 | array | 조건 | task | frames | steps | 상태 |
 |---|---|---|---|---|---|
-| 0 | B1 | turn_off_lever | 21,699 | 16,950 | 수집 완료 |
-| 1 | B1 | extract_cube | 31,573 | 24,650 | 수집 완료 |
-| 2 | B1 | stack_2_cubes | 37,664 | 29,400 | 수집 완료 |
-| 3 | B2 | turn_off_lever | 21,734 | 16,950 | 수집 완료 |
-| 4 | B2 | extract_cube | 31,509 | 24,600 | 수집 완료 |
-| 5 | B3 | turn_off_lever | 21,919 | 17,100 | 수집 완료 |
-| 6 | B2 | stack_2_cubes | — | — | 수집 중 |
-| 7 | B3 | extract_cube | — | — | 수집 중 |
-| 8 | B3 | stack_2_cubes | — | — | 수집 중 |
+| 0 | B2 | stack_2_cubes | 38,682 | 30,200 | 수집 완료 |
+| 1 | B3 | extract_cube | 33,296 | 26,000 | 수집 완료 |
+| 2 | B3 | stack_2_cubes | 38,979 | 30,450 | 수집 완료 |
+| 3 | rank | turn_off_lever | 21,644 | 16,900 | 수집 완료 |
+| 4 | rank | extract_cube | — | — | 수집 중 |
+| 5 | rank | stack_2_cubes | — | — | 수집 중 (83/100) |
 
-수집 완료 6개 = 129,650 step = 11.5 GPU-h → GPU 2장 **≈5.7h**.
+수집 완료 4개 = 103,550 step = 9.1 GPU-h → GPU 2장 **≈4.6h**.
 
-**체이닝은 재제출이다.** 인덱스 6-8 은 데이터셋이 없는 동안 안내만 남기고 `exit 0`
-하므로 오늘 던져도 비용이 0이다. 수집이 끝날 때마다 같은 파일을 다시 던지면 — 끝난 6런은
-체크포인트를 이어받아 1분 만에 재 push 하고, 새로 생긴 것만 실제로 학습한다.
+**`rank` 는 조건이 아니라 이름 모양이다.** 이 arm 은 `ablation2_rank_<task>_10fps` 로
+조건 필드가 없어서, `COND=rank` 일 때 본체가 그 모양을 쓴다. 모델은
+`smolvla_ablation2_rank_<task>_<seed>_10fps`.
+
+**자동으로 이어붙는다.** `smolvla-ablation2` 잡이 이미 큐에 있으면 진입점이
+`--dependency=afterany` 로 그 뒤에 붙여 제출한다. 잡 ID 를 손으로 찾을 필요가 없다.
+`CHAIN=0` 이면 의존성 없이 바로 제출한다 (GPU 가 비어 있는 게 확실할 때만).
+
+먼저 던진 B arm 잡이 담당하는 6셀(B1 ×3, B2 turn_off_lever·extract_cube,
+B3 turn_off_lever)은 **이 목록에 없다** — 그 잡이 잡고 있는 동안 또 돌리면 per-run 락에
+걸릴 뿐이다. 그 잡이 죽으면 `A2_CELLS` 로 되살리면 된다.
 
 **A2/A3 (2026-09-14 완료)** 를 다시 돌리려면:
 
