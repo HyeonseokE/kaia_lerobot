@@ -51,11 +51,16 @@ CAM2='{"observation.images.top": "observation.images.camera1", "observation.imag
 # The task name comes from the launcher. There is no cell table because there are no
 # hardcoded frame counts to keep in one -- see the header.
 TASK="${RQ2_TASK:?RQ2_TASK not set. Source this from cluster/train_rq2.sbatch.}"
-ARM="${RQ2_ARM:?RQ2_ARM not set (cap/ours/ours_repeat).}"
+ARM="${RQ2_ARM:?RQ2_ARM not set (phase1/cap/ours/ours_repeat/random).}"
+# Episode count is part of the dataset name and is NOT always 100: the phase1 arm is a
+# 20-episode premise set (rq2_<task>_phase1_20_10fps). It does not appear in the model
+# name, matching how smolvla_ablation_<task>_<seed>_10fps drops the 100 from
+# ablation_<task>_100_10fps.
+EP="${RQ2_EP:-100}"
 EPOCHS="${EPOCHS:-50}"
 
 HUB_USER=HyeonseokE
-DS="rq2_${TASK}_${ARM}_100_10fps"
+DS="rq2_${TASK}_${ARM}_${EP}_10fps"
 DATASET="$HUB_USER/$DS"
 RENAME="$CAM2"
 

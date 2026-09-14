@@ -6,7 +6,7 @@
 # This one does, in order:
 #   1. preflight  -- refuse early if the HF/wandb tokens are missing
 #   2. git sync   -- clone or fast-forward $HOME/lerobot from GitHub
-#   3. submit     -- queue the 9-cell array (chained) and exit
+#   3. submit     -- queue the 15-cell array (chained) and exit
 #
 # THERE IS NO PREFETCH STEP, unlike every other entry point here. Six of the nine
 # datasets are still being recorded, and a prefetch would settle their availability at
@@ -15,13 +15,19 @@
 # array is still working simply picks it up. That is what lets all nine be submitted at
 # once. See cluster/train_rq2_body.sh.
 #
-#   0  cap         stack_2_cubes  35,697 frames -> 27,850 steps   collected
-#   1  cap         extract_cube   28,613 frames -> 22,350 steps   collected
-#   2  cap         turn_off_lever 21,704 frames -> 16,950 steps   collected
-#   3-5  ours        x3                                           still collecting
-#   6-8  ours_repeat x3                                           still collecting
+#   Five arms x three tasks = 15 cells, in priority order:
 #
-# 67,150 steps across the three collected = ~5.9 GPU-hours, ~3 h on two GPUs.
+#     0-2   phase1       20 ep   5,550 / 4,900 / 3,350 steps    collected
+#     3-5   cap         100 ep  27,850 / 22,350 / 16,950        collected
+#     6-8   ours_repeat 100 ep  28,050 / 24,750 / 17,100        collected
+#     9-10  ours        100 ep  24,600 / 17,000                 collected
+#    11     ours        100 ep  stack_2_cubes                   still collecting
+#    12-14  random      100 ep                                  still collecting
+#
+# The episode count belongs to the cell, not the family: the phase1 premise sets are 20
+# episodes while the rest are 100, and the dataset name carries it.
+#
+# ~232,000 steps across the twelve collected = ~20.5 GPU-hours, ~10 h on two GPUs.
 #
 # IT CHAINS. If an rq2 job is already queued or running, this one is submitted with
 # --dependency=afterany on it. CHAIN=0 skips that.
@@ -81,7 +87,7 @@ for f in "$TRAIN_JOB" "$CHECKOUT/cluster/train_rq2_body.sh" "$CHECKOUT/cluster/f
 done
 
 # ------------------------------------------------------------------ 3. submit
-echo "=== [3/3] submit rq2 array (9 cells, seed ${RQ2_SEEDS:-1000}) ==="
+echo "=== [3/3] submit rq2 array (15 cells, seed ${RQ2_SEEDS:-1000}) ==="
 JOBNAME="smolvla-rq2"
 
 # Chain onto whatever is already running rather than refusing: this is the next batch,
