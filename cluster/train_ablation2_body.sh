@@ -26,6 +26,7 @@ export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 export USER="${USER:-$(id -un)}"
 echo "HOME=$HOME USER=$USER"
 
+CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
 IMAGE="docker://hyeonseoke/lerobot:v1"   # explicit tag -- :latest would serve a stale cached SIF
 
 # ---------------------------------------------------------------- run config
@@ -89,17 +90,34 @@ else
 fi
 
 DS_SRC="$HOME/datasets/$DS"
-[ -f "$DS_SRC/meta/info.json" ] || { echo "FATAL: $DS_SRC not found. Run cluster/main_job_ablation2.sbatch first."; exit 1; }
 
-# Cross-check the budget against the dataset actually on disk. A frame count that no
-# longer matches the table means the dataset was re-uploaded and the epoch budget is
-# silently wrong -- which is not hypothetical: pick_place_A1 went from 30,749 to 31,744
-# frames after its SCRAPE-box script was written, turning that script's 50 epochs into
-# 48. An off-by-two-epoch cell is not comparable to the others, and nothing in the logs
-# would have said so.
+# FETCH ON START, not from a prefetch step.
 #
-# grep/awk, not python3: this runs on the bare compute node, and the only Python on this
-# cluster lives inside the container image.
+# This used to require the entry point to have downloaded the dataset already, and
+# that is how the rank cells were lost twice: their collections landed AFTER the
+# prefetch ran, so the runs skipped and the submission ended with nothing queued for
+# them. Fetching here means a run that reaches the front of the queue after its
+# collection lands just works. flock so two seeds of one dataset fetch it once.
+mkdir -p "$HOME/datasets"
+exec {LFD}>"$HOME/datasets/.fetch_${DS}.lock"
+flock "$LFD"
+if [ -f "$DS_SRC/meta/info.json" ]; then
+  echo "=== $DS already in \$HOME/datasets ==="
+else
+  echo "=== fetching $DATASET -> $DS_SRC ==="
+  export APPTAINERENV_DATASETS_DIR="$HOME/datasets" APPTAINERENV_DS_REPO="$DATASET"
+  FETCH_RC=0
+  apptainer exec "$IMAGE" python "$CHECKOUT/cluster/fetch_dataset.py" || FETCH_RC=$?
+  if [ "$FETCH_RC" -ne 0 ]; then
+    flock -u "$LFD"
+    echo "=== $DATASET is not available yet; nothing to do for this run ==="
+    exit 0
+  fi
+fi
+flock -u "$LFD"
+
+[ -f "$DS_SRC/meta/info.json" ] || { echo "FATAL: $DS_SRC/meta/info.json missing after fetch."; exit 1; }
+
 SRC_FRAMES="$(grep -o '"total_frames"[[:space:]]*:[[:space:]]*[0-9]*' "$DS_SRC/meta/info.json" | grep -o '[0-9]*$')"
 [ -n "$SRC_FRAMES" ] || { echo "FATAL: could not read total_frames from $DS_SRC/meta/info.json"; exit 1; }
 

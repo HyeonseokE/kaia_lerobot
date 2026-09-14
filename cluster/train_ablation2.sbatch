@@ -54,6 +54,7 @@ set -euo pipefail
 export HOME="${HOME:-$(getent passwd "$(id -un)" | cut -d: -f6)}"
 
 CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
+export DEV_CHECKOUT="$CHECKOUT"
 
 if [ "${AUTO_PULL:-1}" = "1" ] && [ -d "$CHECKOUT/.git" ]; then
   echo "=== auto-pull $CHECKOUT (ff-only, flock-serialized) ==="
@@ -88,13 +89,6 @@ SEED="${SEEDS[$(( IDX % ${#SEEDS[@]} ))]}"
 CELL="${CELLS[$(( IDX / ${#SEEDS[@]} ))]}"
 COND="${CELL%%:*}"
 TASK="${CELL##*:}"
-
-# Not collected yet -- say so and stop, rather than letting the body FATAL and marking
-# the array task failed. Rerunning the job later picks it up.
-if [ ! -f "$HOME/datasets/ablation2_${TASK}_${COND}_10fps/meta/info.json" ]; then
-  echo "=== ablation2_${TASK}_${COND}_10fps is not in \$HOME/datasets yet; nothing to do for index $IDX ==="
-  exit 0
-fi
 
 export A2_TASK="$TASK" A2_COND="$COND" SEED
 export NUM_WORKERS="${NUM_WORKERS:-8}"
