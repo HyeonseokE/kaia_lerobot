@@ -141,5 +141,16 @@ for p in "${pids[@]}"; do
   wait "$p" || rc=1
 done
 
+# Report what this task actually used, so the --mem guess stops being a guess. cgroup v2
+# exposes the peak; v1 calls it max_usage_in_bytes. Best effort -- a missing file is not
+# worth failing a finished run over.
+peak_rss() {
+  local f
+  for f in /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
+    [ -r "$f" ] && { awk -v b="$(cat "$f")" 'BEGIN{ printf "%.1f GB", b/1073741824 }'; return; }
+  done
+  echo "unavailable"
+}
+echo "=== peak host RSS for this task (${#MINE[@]} run(s), --mem requested 96G): $(peak_rss) ==="
 echo "=== task $IDX done: $(date) (rc=$rc) ==="
 exit "$rc"
