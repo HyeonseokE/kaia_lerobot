@@ -29,17 +29,18 @@
 # 128G stall on 2026-09-15, and splitting the request per task means a second sbatch file
 # for no gain.
 #
-# AFTER SUBMITTING, CANCEL THE CHAINED COPIES:
+# IT CANCELS THE CHAINED COPIES ITSELF. The same five cells sit unstarted in the
+# stage-3 array, and OOD's Active Jobs list shows that array as one row, so there is no
+# way to click the pending tasks away -- and the row's Delete button would scancel the
+# whole array, killing the tasks that are hours into training. Step [3] below does it
+# properly: squeue for stage3-rq2 tasks in state PENDING and scancel exactly those.
+# RUNNING tasks are not in that list and are never touched.
 #
-#   scancel <stage3-jobid>_[5-6]
-#
-# Array task 5 of the chain is ours/turn_off_lever + ours/stack_2_cubes and task 6 is
-# random/stack_2_cubes + random/extract_cube, so 5 and 6 together cover these three plus
-# one of the tail2 pair. Cancel 5-7 and both new jobs own the whole remainder.
-#
-# Not fatal if you forget: train_rq2_body.sh refuses to start a second copy of a RUNNING
-# run, and a chained task arriving after these finish resumes the finished checkpoint and
-# re-pushes the same weights in about a minute.
+# A pending task that starts in the seconds before this job gets its GPU is RUNNING by
+# then and survives the cancel. That is safe, not a bug: train_rq2_body.sh writes
+# $RUN_DIR/.running_job and the duplicate run here exits FATAL without touching the
+# checkpoints, so the cell is trained once either way -- just by the chain rather than
+# by this job.
 #
 # This job never trains, but it REQUESTS a GPU: the gpu partition will not schedule a
 # 0-GPU job at all. It holds it for the git sync only, seconds.
@@ -63,13 +64,13 @@ CHECKOUT="${DEV_CHECKOUT:-$HOME/lerobot}"
 export APPTAINER_CACHEDIR="/tmp/apptainer-$(whoami)"
 mkdir -p "$APPTAINER_CACHEDIR"
 
-echo "=== [1/3] preflight ==="
+echo "=== [1/4] preflight ==="
 for f in ~/.wandb_token ~/.hf_token; do
   [ -s "$f" ] || { echo "FATAL: $f is missing or empty. Create it in the OOD Files app."; exit 1; }
 done
 echo "tokens ok"
 
-echo "=== [2/3] git sync -> $CHECKOUT ==="
+echo "=== [2/4] git sync -> $CHECKOUT ==="
 if [ -d "$CHECKOUT/.git" ]; then
   apptainer exec "$IMAGE" git -C "$CHECKOUT" pull --ff-only \
     || { echo "FATAL: git pull failed. Fix it by hand."; exit 1; }
@@ -83,7 +84,23 @@ for f in "$RQ" "$CHECKOUT/cluster/train_rq2_body.sh" "$CHECKOUT/cluster/fetch_da
   [ -f "$f" ] || { echo "FATAL: $f missing. Is the commit pushed to GitHub main?"; exit 1; }
 done
 
-echo "=== [3/3] submit ==="
+echo "=== [3/4] retire the chained copies of these cells ==="
+# -t PENDING is the whole safety argument: an array task that is already RUNNING has its
+# own job id and does not appear here, so it cannot be cancelled by accident. squeue
+# prints a pending array range as one entry (976_[5-7]) and scancel takes that verbatim.
+PENDING_CHAIN="$(squeue -u "$USER" -h -n stage3-rq2 -t PENDING -o '%i' || true)"
+if [ -z "$PENDING_CHAIN" ]; then
+  echo "no pending stage3-rq2 tasks left -- nothing to cancel"
+else
+  echo "still-pending chain tasks: $PENDING_CHAIN"
+  for j in $PENDING_CHAIN; do
+    scancel "$j" && echo "  cancelled $j" || echo "  WARNING: scancel $j failed; continuing"
+  done
+fi
+echo "--- queue after the cancel ---"
+squeue -u "$USER" -o '%.12i %.18j %.10T %.10M' || true
+
+echo "=== [4/4] submit ==="
 # Exported into THIS shell and passed with a bare --export=ALL. Never write
 # --export=ALL,RQ2_CELLS="a b c": sbatch splits that value on commas and there is no
 # escaping, so the variable silently arrives truncated.

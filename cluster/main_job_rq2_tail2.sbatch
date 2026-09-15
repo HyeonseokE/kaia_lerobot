@@ -15,11 +15,11 @@
 # GPU; cpus-per-task=18 in train_rq2.sbatch covers 8 dataloader workers each plus the
 # main threads, which is the 18 processes this GPU has available.
 #
-# AFTER SUBMITTING, CANCEL THE CHAINED COPIES:
+# THE CHAINED COPIES OF THESE CELLS ARE RETIRED BY main_job_rq2_rest3.sbatch, which
+# scancels every stage3-rq2 task still in state PENDING before it submits. Submit this
+# one first and that one second and the whole remainder is covered.
 #
-#   scancel <stage3-jobid>_[6-7]
-#
-# Not fatal if you forget. train_rq2_body.sh writes $RUN_DIR/.running_job and refuses to
+# Not fatal if the chain gets there first. train_rq2_body.sh writes $RUN_DIR/.running_job and refuses to
 # start a second copy of a run already RUNNING, and a chained task that arrives after
 # these finish finds the completed checkpoint, resumes, prints "End of training" and
 # re-pushes the same weights in about a minute. Cancelling just avoids the waste.
